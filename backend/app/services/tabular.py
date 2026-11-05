@@ -6,6 +6,7 @@ import csv
 import io
 import json
 import math
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -18,6 +19,7 @@ from ..schemas import (
     ColumnInfo,
     ColumnProfile,
     CorrelationMatrix,
+    GeoResponse,
     PreviewResponse,
     ProfileResponse,
     Resource,
@@ -276,6 +278,9 @@ def _kind(series: pd.Series) -> str:
     if pd.api.types.is_datetime64_any_dtype(series):
         return "date"
     if series.dtype == object:
+        name = str(series.name or "").strip().lower()
+        if re.match(r"^(id|code|insee|siren|siret|codgeo|dep|reg|epci|num)", name):
+            return "text"
         sample = series.dropna().astype(str).head(300)
         if not sample.empty:
             try:
@@ -332,16 +337,21 @@ async def get_frame(
                 raise TabularError("Cette ressource n'a pas d'URL de telechargement.")
 
             text_format = _READERS[kind] in {"csv", "tsv", "json", "geojson", "ndjson"}
+            is_geojson = kind == "geojson"
+            max_size_mb = (
+                settings.max_geojson_download_mb if is_geojson else settings.max_download_mb
+            )
+            # Un GeoJSON tronque serait invalide : on le telecharge en entier.
             content, partial = await _download(
                 http,
                 resource.url,
-                int(settings.max_download_mb * 1_000_000),
-                allow_truncate=text_format,
+                int(max_size_mb * 1_000_000),
+                allow_truncate=text_format and not is_geojson,
             )
             if partial:
                 warnings.append(
                     "Fichier volumineux : seuls les premiers "
-                    f"{settings.max_download_mb:.0f} Mo ont ete telecharges."
+                    f"{max_size_mb:.0f} Mo ont ete telecharges."
                 )
             frame, detail = _read_content(content, _READERS[kind])
             source = f"fichier source ({detail})"
@@ -365,6 +375,142 @@ async def get_frame(
 # --------------------------------------------------------------------------- #
 # API publique du module
 # --------------------------------------------------------------------------- #
+def _iter_geometry_coordinates(geometry: dict[str, Any]):
+    """Parcourt recursivement les coordonnees d'une geometrie GeoJSON."""
+    stack: list[Any] = [geometry.get("coordinates")]
+    while stack:
+        item = stack.pop()
+        if not isinstance(item, (list, tuple)):
+            continue
+        if (
+            len(item) >= 2
+            and isinstance(item[0], (int, float))
+            and isinstance(item[1], (int, float))
+        ):
+            yield float(item[1]), float(item[0])  # lat, lon
+        else:
+            stack.extend(item)
+
+
+def _geojson_bbox(features: list[dict[str, Any]]) -> tuple[float, float, int] | None:
+    latitudes: list[float] = []
+    longitudes: list[float] = []
+    for feature in features:
+        geometry = feature.get("geometry")
+        if not isinstance(geometry, dict):
+            continue
+        for latitude, longitude in _iter_geometry_coordinates(geometry):
+            if -90 <= latitude <= 90 and -180 <= longitude <= 180:
+                latitudes.append(latitude)
+                longitudes.append(longitude)
+
+    if not latitudes:
+        return None
+
+    center_lat = (min(latitudes) + max(latitudes)) / 2
+    center_lon = (min(longitudes) + max(longitudes)) / 2
+    span = max(max(latitudes) - min(latitudes), max(longitudes) - min(longitudes))
+    zoom = 7 if span < 1 else 6 if span < 5 else 5 if span < 15 else 4 if span < 60 else 3
+    return center_lat, center_lon, zoom
+
+
+async def build_geojson(
+    http: httpx.AsyncClient,
+    settings: Settings,
+    resource: Resource,
+    dataset_id: str,
+    limit: int = 800,
+) -> GeoResponse:
+    """Charge un fichier GeoJSON et renvoie une FeatureCollection allegee."""
+    if not resource.url:
+        raise TabularError("Cette ressource GeoJSON n'a pas d'URL de telechargement.")
+
+    content, _ = await _download(
+        http, resource.url, int(settings.max_geojson_download_mb * 1_000_000)
+    )
+    text, encoding = _decode(content)
+    try:
+        payload = json.loads(text)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise TabularError(f"Lecture GeoJSON impossible : {exc}") from exc
+
+    raw_features = payload.get("features") if isinstance(payload, dict) else None
+    if not isinstance(raw_features, list):
+        raise TabularError("Ce fichier n'est pas une FeatureCollection GeoJSON.")
+
+    features: list[dict[str, Any]] = []
+    property_names: set[str] = set()
+    for index, feature in enumerate(raw_features[:limit]):
+        if not isinstance(feature, dict):
+            continue
+        geometry = feature.get("geometry")
+        if not isinstance(geometry, dict):
+            continue
+        raw_properties = feature.get("properties")
+        properties: dict[str, Any] = {}
+        if isinstance(raw_properties, dict):
+            for key, value in raw_properties.items():
+                if isinstance(value, (dict, list, tuple)):
+                    continue
+                properties[str(key)] = _json_safe(value)
+                property_names.add(str(key))
+        features.append(
+            {
+                "type": "Feature",
+                "id": str(index),
+                "geometry": geometry,
+                "properties": properties,
+            }
+        )
+
+    numeric_properties: list[str] = []
+    identifier_pattern = re.compile(
+        r"^(id|code|insee|siren|siret|sirene|codgeo|dep|reg|epci|num)"
+    )
+    for name in sorted(property_names):
+        if identifier_pattern.match(name.strip().lower()):
+            continue
+        values = [
+            feature["properties"].get(name)
+            for feature in features
+            if feature["properties"].get(name) not in (None, "")
+        ]
+        if not values:
+            continue
+        numeric = pd.to_numeric(pd.Series(values), errors="coerce")
+        if numeric.notna().mean() >= 0.8:
+            numeric_properties.append(name)
+
+    bbox = _geojson_bbox(features)
+    center = None
+    zoom = 5
+    if bbox is not None:
+        center = {"lat": round(bbox[0], 6), "lon": round(bbox[1], 6)}
+        zoom = bbox[2]
+
+    warnings = []
+    if len(raw_features) > len(features):
+        warnings.append(
+            f"Carte limitee aux {len(features):,} premieres geometries du fichier."
+            .replace(",", " ")
+        )
+    if encoding not in {"utf-8", "utf-8-sig"}:
+        warnings.append(f"Encodage detecte : {encoding}.")
+
+    return GeoResponse(
+        dataset_id=dataset_id,
+        resource=resource,
+        geojson={"type": "FeatureCollection", "features": features},
+        properties=sorted(property_names),
+        numeric_properties=numeric_properties,
+        features_count=len(features),
+        truncated=len(raw_features) > len(features),
+        center=center,
+        zoom=zoom,
+        warnings=warnings,
+    )
+
+
 async def build_preview(
     http: httpx.AsyncClient,
     settings: Settings,

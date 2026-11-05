@@ -98,7 +98,7 @@ def render_footer() -> None:
               <ul>
                 <li>Backend : FastAPI, httpx, pandas</li>
                 <li>Frontend : Streamlit, Plotly</li>
-                <li>Cache mémoire TTL côté backend</li>
+                <li>Cache mémoire ou Redis côté backend</li>
               </ul>
             </div>
           </div>

@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
         warmup.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await warmup
+        await app.state.datagouv.aclose()
         await http.aclose()
 
 

@@ -4,9 +4,20 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from ...schemas import DatasetDetail, PreviewResponse, ProfileResponse, Resource
+from ...schemas import (
+    DatasetDetail,
+    GeoResponse,
+    PreviewResponse,
+    ProfileResponse,
+    Resource,
+)
 from ...services.datagouv import DataGouvError
-from ...services.tabular import TabularError, build_preview, build_profile
+from ...services.tabular import (
+    TabularError,
+    build_geojson,
+    build_preview,
+    build_profile,
+)
 from ..deps import ClientDep
 
 router = APIRouter(prefix="/datasets", tags=["jeux de donnees"])
@@ -71,3 +82,32 @@ async def profile_dataset(
     bundle = DatasetDetail(**await client.get_dataset_bundle(dataset_id))
     resource = _pick_resource(bundle, resource_id)
     return await build_profile(client.http, client.settings, resource, bundle.id, limit)
+
+
+@router.get(
+    "/{dataset_id}/geo",
+    response_model=GeoResponse,
+    summary="FeatureCollection GeoJSON pour une carte choroplethe",
+)
+async def geo_dataset(
+    dataset_id: str,
+    client: ClientDep,
+    resource_id: str | None = Query(None, description="Identifiant de la ressource GeoJSON"),
+    limit: int = Query(800, ge=10, le=2_000, description="Nombre de geometries"),
+) -> GeoResponse:
+    bundle = DatasetDetail(**await client.get_dataset_bundle(dataset_id))
+    resource = _pick_resource(bundle, resource_id)
+
+    # Si la ressource choisie n'est pas GeoJSON, chercher une ressource geo.
+    if (resource.format or "").lower() not in {"geojson", "json"}:
+        geo_resources = [
+            candidate
+            for candidate in bundle.resources
+            if (candidate.format or "").lower() in {"geojson", "json"}
+        ]
+        if geo_resources:
+            resource = geo_resources[0]
+
+    return await build_geojson(
+        client.http, client.settings, resource, bundle.id, limit
+    )

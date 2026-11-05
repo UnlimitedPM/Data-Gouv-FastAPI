@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import api_client as api
 import pandas as pd
 import streamlit as st
+import url_state
 from components.cards import (
     dataset_banner_html,
     empty_state,
@@ -19,6 +21,7 @@ from components.charts import (
     categorical_columns,
     correlation_heatmap,
     geographic_columns,
+    geojson_choropleth,
     map_figure,
     numeric_columns,
 )
@@ -45,6 +48,11 @@ def _column_kind(series: pd.Series) -> str:
         return "number"
     if pd.api.types.is_datetime64_any_dtype(series):
         return "date"
+    name = str(series.name or "").strip().lower()
+    if series.dtype == object and re.match(
+        r"^(id|code|insee|siren|siret|codgeo|dep|reg|epci|num)", name
+    ):
+        return "text"
     sample = series.dropna().astype(str).head(200)
     if not sample.empty:
         try:
@@ -233,33 +241,86 @@ def _render_preview_tab(frame: pd.DataFrame, payload: dict[str, Any], dataset_id
     )
 
 
-def _render_map_tab(frame: pd.DataFrame, dataset_id: str) -> None:
-    geo = geographic_columns(frame)
-    if geo:
-        st.caption(
-            f"Coordonnées détectées : **{geo[0]}** (latitude) et **{geo[1]}** (longitude). "
-            "Survolez un point pour le détail, zoomez avec la molette."
-        )
-        figure_map = map_figure(frame, geo[0], geo[1])
-        if figure_map is not None:
-            st.plotly_chart(figure_map, width="stretch")
+def _render_map_tab(
+    frame: pd.DataFrame, dataset_id: str, resource: dict[str, Any]
+) -> None:
+    resource_id = resource.get("id") or ""
+    geo_format = (resource.get("format") or "").lower() in {"geojson", "json"}
+    rendered = False
+
+    if geo_format:
+        try:
+            with st.spinner("Chargement des géométries GeoJSON…"):
+                geo_payload = api.get_geo(dataset_id, resource_id)
+        except api.ApiError as exc:
+            st.warning(f"Carte GeoJSON indisponible : {exc}")
+            geo_payload = None
+
+        if geo_payload and geo_payload.get("features_count"):
             st.caption(
-                "Les filtres de lignes s'appliquent aussi à la carte. "
-                "Utilisez l'icône appareil photo pour exporter la carte en PNG."
+                f"**{geo_payload['features_count']}** objets GeoJSON chargés. "
+                "Choisissez une propriété pour colorer la carte."
             )
-        else:
-            st.info(
-                "Les colonnes de coordonnées existent mais ne contiennent pas de "
-                "valeurs latitude/longitude exploitables."
+            properties = list(geo_payload.get("properties") or [])
+            numeric_properties = list(geo_payload.get("numeric_properties") or [])
+            candidates = numeric_properties or properties
+            color_property = None
+            if candidates:
+                choice = st.selectbox(
+                    "Colorer par",
+                    ["Aucune"] + candidates,
+                    key=f"geo-color-{dataset_id}-{resource_id}",
+                )
+                color_property = None if choice == "Aucune" else choice
+
+            figure_geo = geojson_choropleth(
+                geo_payload.get("geojson") or {},
+                properties,
+                color_property=color_property,
+                center=geo_payload.get("center"),
+                zoom=int(geo_payload.get("zoom") or 5),
             )
-    else:
+            if figure_geo is not None:
+                st.plotly_chart(figure_geo, width="stretch")
+                st.caption(
+                    "Survolez une zone pour voir ses propriétés. "
+                    "L'icône appareil photo exporte la carte en PNG."
+                )
+                rendered = True
+            for warning in geo_payload.get("warnings") or []:
+                st.warning(warning)
+
+    if not rendered:
+        geo = geographic_columns(frame)
+        if geo:
+            st.caption(
+                f"Coordonnées détectées : **{geo[0]}** (latitude) et **{geo[1]}** (longitude). "
+                "Survolez un point pour le détail, zoomez avec la molette."
+            )
+            figure_map = map_figure(frame, geo[0], geo[1])
+            if figure_map is not None:
+                st.plotly_chart(figure_map, width="stretch")
+                st.caption(
+                    "Les filtres de lignes s'appliquent aussi à la carte. "
+                    "Utilisez l'icône appareil photo pour exporter la carte en PNG."
+                )
+                rendered = True
+            else:
+                st.info(
+                    "Les colonnes de coordonnées existent mais ne contiennent pas de "
+                    "valeurs latitude/longitude exploitables."
+                )
+
+    if not rendered:
         st.info(
-            "Aucune colonne latitude/longitude détectée dans ce fichier. "
-            "La carte s'affiche automatiquement dès que les colonnes contiennent "
-            "des noms comme `lat`, `latitude`, `lon`, `lng` ou `longitude`."
+            "Aucune géométrie exploitable détectée dans ce fichier. "
+            "La carte s'affiche automatiquement pour les ressources GeoJSON ou "
+            "lorsque les colonnes contiennent des noms comme `lat`, `latitude`, "
+            "`lon`, `lng` ou `longitude`."
         )
         st.caption(
-            "Colonnes du fichier : " + ", ".join(str(name) for name in frame.columns[:20])
+            "Colonnes du fichier : "
+            + ", ".join(str(name) for name in frame.columns[:20])
             + ("…" if len(frame.columns) > 20 else "")
         )
 
@@ -491,10 +552,17 @@ def render() -> None:
         placeholder="ex : 6aec4a5e2f9ad56a51d37e7c",
     )
     if row[1].button("Charger", width="stretch") and typed.strip():
-        st.session_state["selected_dataset_id"] = typed.strip()
+        new_id = typed.strip()
+        if new_id != st.session_state.get("selected_dataset_id"):
+            st.session_state.pop("url_resource", None)
+            st.session_state.pop("url_filters", None)
+        st.session_state["selected_dataset_id"] = new_id
         st.rerun()
     if row[2].button("Réinitialiser", width="stretch"):
         st.session_state.pop("selected_dataset_id", None)
+        st.session_state.pop("url_resource", None)
+        st.session_state.pop("url_filters", None)
+        url_state.clear_view()
         st.rerun()
 
     dataset_id = (st.session_state.get("selected_dataset_id") or "").strip()
@@ -525,7 +593,21 @@ def render() -> None:
     for index, resource in enumerate(tabular, start=1):
         label = f"{resource_label(resource)} — fichier {index}"
         options[label] = resource
-    choice = st.selectbox("Fichier à analyser", list(options), key=f"resource-choice-{dataset_id}")
+
+    default_index = 0
+    url_resource = st.session_state.get("url_resource")
+    if url_resource:
+        for index, candidate in enumerate(tabular):
+            if candidate.get("id") == url_resource:
+                default_index = index
+                break
+
+    choice = st.selectbox(
+        "Fichier à analyser",
+        list(options),
+        index=default_index,
+        key=f"resource-choice-{dataset_id}",
+    )
     resource = options[choice]
     resource_id = resource.get("id") or ""
 
@@ -549,11 +631,30 @@ def render() -> None:
         with st.spinner("Lecture du fichier…"):
             preview = api.get_preview(dataset_id, resource_id, limit)
     except api.ApiError as exc:
-        st.error(str(exc))
+        # Un GeoJSON trop volumineux ne peut pas être prévisualisé, mais la
+        # carte et les métadonnées restent accessibles.
+        st.warning(f"Aperçu tabulaire indisponible : {exc}")
+        fallback_tabs = st.tabs(["🗺️ Carte", "ℹ️ Métadonnées"])
+        with fallback_tabs[0]:
+            _render_map_tab(pd.DataFrame(), dataset_id, resource)
+        with fallback_tabs[1]:
+            _render_metadata_tab(dataset)
         return
+
+    # Filtres fournis par un lien partage : appliques une seule fois.
+    if st.session_state.get("url_filters") and st.session_state.get("url_resource") in {
+        None,
+        resource_id,
+    }:
+        st.session_state.setdefault(
+            f"table-filters::{dataset_id}::{resource_id}",
+            st.session_state["url_filters"],
+        )
+        st.session_state.pop("url_filters", None)
 
     frame = _frame_from_preview(preview)
     frame, active_filters = _render_filters(frame, dataset_id, resource_id)
+    url_state.sync_view(dataset_id, resource_id, active_filters)
     if active_filters:
         st.caption(
             f"{len(frame):,} lignes conservées sur les lignes chargées après filtres."
@@ -567,9 +668,16 @@ def render() -> None:
         _render_metadata_tab(dataset)
         return
 
+    with st.expander("🔗 Partager cette vue"):
+        st.code(url_state.share_url(), language=None)
+        st.caption(
+            "Le lien conserve le jeu de données, le fichier choisi et les filtres "
+            "actifs. Il suffit de le copier depuis l'icône dédiée."
+        )
+
     st.caption(
         "💡 L'onglet 🗺️ Carte détecte automatiquement les colonnes "
-        "latitude/longitude du fichier."
+        "latitude/longitude du fichier, ainsi que les ressources GeoJSON."
     )
     tabs = st.tabs(
         [
@@ -586,7 +694,7 @@ def render() -> None:
     with tabs[1]:
         _render_charts_tab(frame)
     with tabs[2]:
-        _render_map_tab(frame, dataset_id)
+        _render_map_tab(frame, dataset_id, resource)
     with tabs[3]:
         _render_correlation_tab(frame)
     with tabs[4]:

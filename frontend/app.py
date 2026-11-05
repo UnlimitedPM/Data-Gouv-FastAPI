@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import api_client as api
 import streamlit as st
+import url_state
 from components.header import (
     render_footer,
     render_header,
@@ -11,7 +12,7 @@ from components.header import (
     render_sidebar_status,
 )
 from styles import inject_css
-from views import about, dashboard, explore, organizations, visualize
+from views import about, compare, dashboard, explore, organizations, visualize
 
 st.set_page_config(
     page_title="DataFrance Explorer",
@@ -26,9 +27,20 @@ PAGES = {
     "Tableau de bord": dashboard.render,
     "Explorer les données": explore.render,
     "Visualiser": visualize.render,
+    "Comparer": compare.render,
     "Organisations": organizations.render,
     "À propos": about.render,
 }
+
+# Restaure une vue partagee par URL (dataset, fichier, filtres).
+initial_view = url_state.read_view()
+if initial_view["dataset"] and "selected_dataset_id" not in st.session_state:
+    st.session_state["selected_dataset_id"] = initial_view["dataset"]
+    st.session_state["pending_page"] = "Visualiser"
+if initial_view["resource"]:
+    st.session_state["url_resource"] = initial_view["resource"]
+if initial_view["filters"]:
+    st.session_state["url_filters"] = initial_view["filters"]
 
 # Applique une demande de navigation avant de (re)creer le widget radio.
 pending_page = st.session_state.pop("pending_page", None)

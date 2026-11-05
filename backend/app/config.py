@@ -24,13 +24,15 @@ class Settings(BaseSettings):
         "DataFranceExplorer/0.1 (+https://github.com/; contact: local dev)"
     )
 
-    # Cache memoire
+    # Cache memoire / Redis (laisser vide pour un cache 100 % memoire)
     cache_ttl: int = 300
     cache_maxsize: int = 512
+    redis_url: str | None = None
 
     # Previsualisation de fichiers
     max_download_mb: float = 25.0
     max_parquet_download_mb: float = 60.0
+    max_geojson_download_mb: float = 100.0
     preview_rows: int = 200
     profile_rows: int = 20_000
 

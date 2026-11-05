@@ -24,9 +24,11 @@ def render() -> None:
         - un **aperçu des fichiers** tabulaires (CSV, JSON, Excel, Parquet) ;
         - des **filtres locaux** par plage numérique, période ou modalités ;
         - des **graphiques automatiques** (distributions, catégories, séries temporelles) ;
-        - une **carte interactive** dans l'onglet **🗺️ Carte** de *Visualiser*,
-          si le fichier contient des colonnes latitude/longitude ;
+        - une **carte interactive** dans l'onglet **🗺️ Carte** de *Visualiser* :
+          points latitude/longitude ou carte choroplèthe GeoJSON ;
         - un **profil statistique** des colonnes et une matrice de corrélations ;
+        - une page **Comparer** pour rapprocher deux jeux de données ;
+        - des **liens partageables** qui conservent dataset, fichier et filtres ;
         - un **annuaire des organisations** productrices.
 
         ### Architecture
@@ -58,6 +60,7 @@ def render() -> None:
         | `GET` | `/api/datasets/{id}` | fiche complète + ressources |
         | `GET` | `/api/datasets/{id}/preview` | aperçu d'une ressource |
         | `GET` | `/api/datasets/{id}/profile` | profil statistique |
+        | `GET` | `/api/datasets/{id}/geo` | GeoJSON allégé pour la carte |
         | `GET` | `/api/organizations/{id}` | fiche organisation |
 
         Documentation interactive complète : [`/docs`](http://127.0.0.1:8000/docs).
@@ -84,14 +87,17 @@ def render() -> None:
         - Les filtres locaux et la carte portent sur les lignes chargées dans
           l'aperçu, pas sur l'intégralité du fichier distant.
         - La carte nécessite des colonnes de coordonnées explicites (`lat`, `latitude`,
-          `lon`, `lng`, `longitude`) ; un exemple est proposé dans l'onglet Carte.
+          `lon`, `lng`, `longitude`) ou une ressource GeoJSON ; un exemple est
+          proposé dans l'onglet Carte.
+        - Les cartes GeoJSON sont limitées aux 800 premières géométries.
+        - Le cache est en mémoire par défaut ; Redis est optionnel (Docker Compose).
 
         ### Pistes pour la suite
 
-        - Export des visualisations en PNG / CSV et partage de vues par URL.
-        - Filtres combinés persistants et cartographie GeoJSON (contours, choroplèthes).
-        - Cache persistant (Redis) et déploiement Docker.
-        - Comparaison de plusieurs jeux de données.
+        - Authentification et favoris.
+        - Export PDF natif et rapport de comparaison téléchargeable.
+        - Jointures entre jeux de données sur une clé commune.
+        - Reverse proxy TLS et monitoring.
         """
     )
 

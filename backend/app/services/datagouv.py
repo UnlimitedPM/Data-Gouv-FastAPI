@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 import httpx
 
 from ..config import Settings
-from .cache import AsyncTTLCache
+from .cache import build_cache
 
 DEFAULT_FACETS: tuple[str, ...] = (
     "organization_id_with_name",
@@ -266,8 +266,14 @@ class DataGouvClient:
     def __init__(self, settings: Settings, http: httpx.AsyncClient) -> None:
         self.settings = settings
         self.http = http
-        self._cache = AsyncTTLCache(settings.cache_maxsize, settings.cache_ttl)
-        self._org_catalog_cache = AsyncTTLCache(maxsize=1, ttl=6 * 3600)
+        self._cache = build_cache(settings, "datagouv")
+        self._org_catalog_cache = build_cache(settings, "organizations", ttl=6 * 3600)
+
+    async def aclose(self) -> None:
+        for cache in (self._cache, self._org_catalog_cache):
+            close = getattr(cache, "aclose", None)
+            if close is not None:
+                await close()
 
     # ------------------------------------------------------------------ #
     # Transport

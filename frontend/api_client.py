@@ -79,6 +79,27 @@ def suggest_datasets(term: str, limit: int = 8) -> list[str]:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def suggest_dataset_choices(term: str, limit: int = 8) -> list[str]:
+    """Suggestions « titre · id » pour la page de comparaison."""
+    term = (term or "").strip()
+    params: dict[str, Any] = {"page_size": limit}
+    if len(term) >= 2:
+        params["q"] = term
+    else:
+        params["sort"] = "-created"
+    payload = _request("/api/search/datasets", params)
+    choices: list[str] = []
+    for row in payload.get("data") or []:
+        title = (row.get("title") or "").strip()
+        dataset_id = row.get("id") or ""
+        if title and dataset_id:
+            choice = f"{title}  ·  {dataset_id}"
+            if choice not in choices:
+                choices.append(choice)
+    return choices
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def suggest_organizations(term: str, limit: int = 8) -> list[str]:
     """Suggestions de noms pour la recherche d'organisations en direct."""
     term = (term or "").strip()
@@ -110,6 +131,14 @@ def get_preview(dataset_id: str, resource_id: str | None = None, limit: int = 50
 def get_profile(dataset_id: str, resource_id: str | None = None, limit: int = 20_000) -> dict[str, Any]:
     return _request(
         f"/api/datasets/{dataset_id}/profile",
+        {"resource_id": resource_id, "limit": limit},
+    )
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_geo(dataset_id: str, resource_id: str | None = None, limit: int = 800) -> dict[str, Any]:
+    return _request(
+        f"/api/datasets/{dataset_id}/geo",
         {"resource_id": resource_id, "limit": limit},
     )
 

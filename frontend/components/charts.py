@@ -365,6 +365,121 @@ def map_figure(
     return figure
 
 
+def _geojson_first_geometry_type(features: list[dict[str, Any]]) -> str:
+    for feature in features:
+        geometry = feature.get("geometry")
+        if isinstance(geometry, dict) and geometry.get("type"):
+            return str(geometry["type"])
+    return ""
+
+
+def geojson_point_frame(features: list[dict[str, Any]]) -> pd.DataFrame:
+    """Extrait un point par entite pour les GeoJSON de type Point/MultiPoint."""
+    rows: list[dict[str, Any]] = []
+    for feature in features:
+        geometry = feature.get("geometry") or {}
+        geometry_type = geometry.get("type")
+        coordinates = geometry.get("coordinates") or []
+        if geometry_type == "Point":
+            points = [coordinates]
+        elif geometry_type == "MultiPoint":
+            points = coordinates
+        else:
+            points = coordinates[:1]
+
+        properties = feature.get("properties") or {}
+        for point in points:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            longitude, latitude = point[0], point[1]
+            if not isinstance(longitude, (int, float)) or not isinstance(
+                latitude, (int, float)
+            ):
+                continue
+            rows.append(
+                {
+                    "id": feature.get("id"),
+                    "lat": float(latitude),
+                    "lon": float(longitude),
+                    **properties,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def geojson_choropleth(
+    geojson: dict[str, Any],
+    properties: list[str],
+    color_property: str | None = None,
+    center: dict[str, float] | None = None,
+    zoom: int = 5,
+) -> go.Figure | None:
+    """Carte choroplethe a partir d'une FeatureCollection GeoJSON."""
+    features = geojson.get("features") or []
+    if not features:
+        return None
+
+    if _geojson_first_geometry_type(features) in {"Point", "MultiPoint"}:
+        plot_frame = geojson_point_frame(features)
+        if plot_frame.empty:
+            return None
+        color_column = color_property if color_property in plot_frame.columns else None
+        color_is_numeric = bool(
+            color_column and pd.api.types.is_numeric_dtype(plot_frame[color_column])
+        )
+        figure = px.scatter_map(
+            plot_frame,
+            lat="lat",
+            lon="lon",
+            color=color_column,
+            hover_name="id",
+            hover_data=[column for column in properties[:6] if column in plot_frame.columns],
+            center=center,
+            zoom=zoom,
+            map_style="open-street-map",
+            height=520,
+            opacity=0.8,
+            color_continuous_scale="YlGnBu" if color_is_numeric else None,
+            color_discrete_sequence=(
+                PALETTE if color_column and not color_is_numeric else None if color_column else [BLUE]
+            ),
+            title=f"Carte GeoJSON — {len(plot_frame):,} points".replace(",", " "),
+        )
+    else:
+        plot_frame = pd.DataFrame(
+            [
+                {"id": feature.get("id"), **(feature.get("properties") or {})}
+                for feature in features
+            ]
+        )
+        color_column = color_property if color_property in plot_frame.columns else None
+        color_is_numeric = bool(
+            color_column and pd.api.types.is_numeric_dtype(plot_frame[color_column])
+        )
+        figure = px.choropleth_map(
+            plot_frame,
+            geojson=geojson,
+            locations="id",
+            featureidkey="id",
+            color=color_column,
+            hover_name="id",
+            hover_data=[column for column in properties[:6] if column in plot_frame.columns],
+            center=center,
+            zoom=zoom,
+            map_style="open-street-map",
+            height=520,
+            opacity=0.65,
+            color_continuous_scale="YlGnBu" if color_is_numeric else None,
+            color_discrete_sequence=(
+                PALETTE if color_column and not color_is_numeric else None if color_column else [BLUE]
+            ),
+            title=f"Carte GeoJSON — {len(features):,} objets".replace(",", " "),
+        )
+
+    figure.update_layout(margin={"l": 0, "r": 0, "t": 44, "b": 0})
+    return figure
+
+
 def auto_figures(frame: pd.DataFrame, max_figures: int = 6) -> list[go.Figure]:
     """Genere une selection de figures pertinentes pour un DataFrame."""
     if frame.empty:

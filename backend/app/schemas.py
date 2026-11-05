@@ -186,3 +186,16 @@ class ProfileResponse(BaseModel):
     numeric_summary: list[dict[str, Any]] = Field(default_factory=list)
     correlation: CorrelationMatrix | None = None
     warnings: list[str] = Field(default_factory=list)
+
+
+class GeoResponse(BaseModel):
+    dataset_id: str
+    resource: Resource
+    geojson: dict[str, Any]
+    properties: list[str] = Field(default_factory=list)
+    numeric_properties: list[str] = Field(default_factory=list)
+    features_count: int = 0
+    truncated: bool = False
+    center: dict[str, float] | None = None
+    zoom: int = 5
+    warnings: list[str] = Field(default_factory=list)
