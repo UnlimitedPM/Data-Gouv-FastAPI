@@ -286,8 +286,8 @@ Les composants vivent dans `frontend/components/` et réutilisent les classes CS
 - Cartes GeoJSON limitées aux **800 premières géométries** (paramètre `limit` de l'API).
 - Graphiques automatiques simples ; les filtres locaux portent sur les lignes
   chargées dans le navigateur, pas sur le fichier complet.
-- Export **CSV** des lignes filtrées et **PNG/HTML** via la barre d'outils Plotly.
-  Pas encore d'export PDF natif.
+- Export **CSV** des lignes filtrées et **PNG** via la barre d'outils Plotly.
+  Pas encore d'export PDF ou HTML natif.
 - Interface non officielle ; les données restent soumises aux licences de chaque producteur.
 
 ## 🔭 Pistes pour la suite
