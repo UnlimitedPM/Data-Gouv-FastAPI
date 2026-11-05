@@ -30,6 +30,9 @@ from components.formatting import (
     license_label,
 )
 
+MAP_DEMO_DATASET = "536995eda3a729239d204864"
+MAP_DEMO_NAME = "Gares ferroviaires de tous types"
+
 
 def _frame_from_preview(payload: dict[str, Any]) -> pd.DataFrame:
     columns = [column.get("name", "") for column in payload.get("columns") or []]
@@ -82,7 +85,7 @@ def _apply_filters(frame: pd.DataFrame, active: dict[str, Any]) -> pd.DataFrame:
             numbers = pd.to_numeric(series, errors="coerce")
             result = result[numbers.between(float(spec[0]), float(spec[1]))]
         elif isinstance(spec, tuple) and len(spec) == 2:
-            dates = pd.to_datetime(series, errors="coerce").dt.date
+            dates = pd.to_datetime(series, errors="coerce", format="mixed").dt.date
             result = result[(dates >= spec[0]) & (dates <= spec[1])]
     return result
 
@@ -126,7 +129,10 @@ def _render_filters(
                         key=f"filter-value::{state_key}::{column}",
                     )
         elif kind == "date":
-            dates = pd.to_datetime(series, errors="coerce").dropna()
+            try:
+                dates = pd.to_datetime(series, errors="coerce", format="mixed").dropna()
+            except (TypeError, ValueError):
+                dates = pd.to_datetime(series, errors="coerce").dropna()
             if dates.empty:
                 controls[1].info("Aucune date exploitable.")
             else:
@@ -185,6 +191,14 @@ def _render_empty_state() -> None:
         empty_state("Aucun jeu de données récent à proposer.")
         return
 
+    if st.button(
+        f"🗺️ Voir la carte avec « {MAP_DEMO_NAME} »",
+        width="stretch",
+        key="empty-map-demo",
+    ):
+        st.session_state["selected_dataset_id"] = MAP_DEMO_DATASET
+        st.rerun()
+
     left, right = st.columns(2)
     for index, dataset in enumerate(latest[:6]):
         with (left if index % 2 == 0 else right):
@@ -219,18 +233,51 @@ def _render_preview_tab(frame: pd.DataFrame, payload: dict[str, Any], dataset_id
     )
 
 
-def _render_charts_tab(frame: pd.DataFrame) -> None:
+def _render_map_tab(frame: pd.DataFrame, dataset_id: str) -> None:
     geo = geographic_columns(frame)
     if geo:
-        st.markdown("#### Carte interactive")
         st.caption(
-            f"Colonnes détectées : {geo[0]} (latitude) et {geo[1]} (longitude). "
-            "Cliquez pour explorer, zoomez avec la molette."
+            f"Coordonnées détectées : **{geo[0]}** (latitude) et **{geo[1]}** (longitude). "
+            "Survolez un point pour le détail, zoomez avec la molette."
         )
         figure_map = map_figure(frame, geo[0], geo[1])
         if figure_map is not None:
             st.plotly_chart(figure_map, width="stretch")
+            st.caption(
+                "Les filtres de lignes s'appliquent aussi à la carte. "
+                "Utilisez l'icône appareil photo pour exporter la carte en PNG."
+            )
+        else:
+            st.info(
+                "Les colonnes de coordonnées existent mais ne contiennent pas de "
+                "valeurs latitude/longitude exploitables."
+            )
+    else:
+        st.info(
+            "Aucune colonne latitude/longitude détectée dans ce fichier. "
+            "La carte s'affiche automatiquement dès que les colonnes contiennent "
+            "des noms comme `lat`, `latitude`, `lon`, `lng` ou `longitude`."
+        )
+        st.caption(
+            "Colonnes du fichier : " + ", ".join(str(name) for name in frame.columns[:20])
+            + ("…" if len(frame.columns) > 20 else "")
+        )
 
+    st.markdown("#### Tester la carte")
+    st.caption(
+        "Le jeu de données de démonstration contient les coordonnées WGS84 de "
+        "toutes les gares françaises."
+    )
+    if st.button(
+        f"Charger « {MAP_DEMO_NAME} »",
+        key=f"map-demo-{dataset_id}",
+        width="stretch",
+    ):
+        st.session_state["selected_dataset_id"] = MAP_DEMO_DATASET
+        st.rerun()
+
+
+def _render_charts_tab(frame: pd.DataFrame) -> None:
     figures = auto_figures(frame)
     if not figures:
         st.info(
@@ -520,18 +567,31 @@ def render() -> None:
         _render_metadata_tab(dataset)
         return
 
+    st.caption(
+        "💡 L'onglet 🗺️ Carte détecte automatiquement les colonnes "
+        "latitude/longitude du fichier."
+    )
     tabs = st.tabs(
-        ["📋 Aperçu", "📊 Graphiques", "🔗 Corrélations", "🧮 Profil des colonnes", "ℹ️ Métadonnées"]
+        [
+            "📋 Aperçu",
+            "📊 Graphiques",
+            "🗺️ Carte",
+            "🔗 Corrélations",
+            "🧮 Profil des colonnes",
+            "ℹ️ Métadonnées",
+        ]
     )
     with tabs[0]:
         _render_preview_tab(frame, preview, dataset_id)
     with tabs[1]:
         _render_charts_tab(frame)
     with tabs[2]:
-        _render_correlation_tab(frame)
+        _render_map_tab(frame, dataset_id)
     with tabs[3]:
-        _render_profile_tab(dataset_id, resource_id)
+        _render_correlation_tab(frame)
     with tabs[4]:
+        _render_profile_tab(dataset_id, resource_id)
+    with tabs[5]:
         _render_metadata_tab(dataset)
 
     st.caption(

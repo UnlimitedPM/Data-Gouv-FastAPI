@@ -25,8 +25,9 @@ Streamlit** pour rechercher, prévisualiser et visualiser les jeux de données.
   data.gouv.fr** sont utilisés en priorité.
 - **Filtres locaux** : filtrer les lignes par plage numérique, période ou valeurs
   catégorielles, puis explorer les graphiques et corrélations sur le sous-ensemble.
-- **Carte interactive** : détection automatique de colonnes latitude/longitude et
-  affichage des points sur un fond OpenStreetMap.
+- **Carte interactive** : onglet **🗺️ Carte** de la page *Visualiser*. Détection
+  automatique des colonnes latitude/longitude et affichage sur fond OpenStreetMap.
+  Un bouton de démonstration charge le jeu de données des gares ferroviaires.
 - **Graphiques automatiques** : distributions numériques, répartitions
   catégorielles, séries temporelles, nuages de points, corrélations.
 - **Profil statistique** : valeurs manquantes, unicité, min/moyenne/médiane/max,

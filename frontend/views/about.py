@@ -23,8 +23,9 @@ def render() -> None:
         - une **fiche détaillée** pour chaque jeu de données ;
         - un **aperçu des fichiers** tabulaires (CSV, JSON, Excel, Parquet) ;
         - des **filtres locaux** par plage numérique, période ou modalités ;
-        - des **graphiques automatiques** (distributions, catégories, séries temporelles),
-          une **carte interactive** si des coordonnées sont détectées ;
+        - des **graphiques automatiques** (distributions, catégories, séries temporelles) ;
+        - une **carte interactive** dans l'onglet **🗺️ Carte** de *Visualiser*,
+          si le fichier contient des colonnes latitude/longitude ;
         - un **profil statistique** des colonnes et une matrice de corrélations ;
         - un **annuaire des organisations** productrices.
 
@@ -82,6 +83,8 @@ def render() -> None:
           ils restent volontairement simples.
         - Les filtres locaux et la carte portent sur les lignes chargées dans
           l'aperçu, pas sur l'intégralité du fichier distant.
+        - La carte nécessite des colonnes de coordonnées explicites (`lat`, `latitude`,
+          `lon`, `lng`, `longitude`) ; un exemple est proposé dans l'onglet Carte.
 
         ### Pistes pour la suite
 
