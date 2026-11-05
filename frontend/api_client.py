@@ -64,6 +64,36 @@ def search_organizations(**params: Any) -> dict[str, Any]:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def suggest_datasets(term: str, limit: int = 8) -> list[str]:
+    """Suggestions de titres pour la recherche en direct."""
+    term = (term or "").strip()
+    if len(term) < 2:
+        return []
+    payload = _request("/api/search/datasets", {"q": term, "page_size": limit})
+    titles: list[str] = []
+    for row in payload.get("data") or []:
+        title = (row.get("title") or "").strip()
+        if title and title not in titles:
+            titles.append(title)
+    return titles
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def suggest_organizations(term: str, limit: int = 8) -> list[str]:
+    """Suggestions de noms pour la recherche d'organisations en direct."""
+    term = (term or "").strip()
+    if len(term) < 2:
+        return []
+    payload = _request("/api/search/organizations", {"q": term, "page_size": limit})
+    names: list[str] = []
+    for row in payload.get("data") or []:
+        name = (row.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def get_dataset(dataset_id: str) -> dict[str, Any]:
     return _request(f"/api/datasets/{dataset_id}")
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import unicodedata
 from typing import Any
 from urllib.parse import urlencode
 
@@ -177,6 +179,31 @@ def _slim_dataset_detail(raw: dict[str, Any]) -> dict[str, Any]:
     return dataset
 
 
+def _normalize_text(value: Any) -> str:
+    """Minuscule sans accents, pour une recherche tolerante."""
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    return "".join(char for char in text if not unicodedata.combining(char)).lower()
+
+
+def _slim_org_full(raw: dict[str, Any]) -> dict[str, Any]:
+    """Organisation + metriques, format commun aux listes et au catalogue."""
+    org = _slim_org(raw) or {}
+    metrics = raw.get("metrics") if isinstance(raw.get("metrics"), dict) else {}
+    org.update(
+        {
+            "description": raw.get("description"),
+            "created_at": raw.get("created_at"),
+            "last_modified": raw.get("last_modified"),
+            "datasets_count": metrics.get("datasets"),
+            "reuses_count": metrics.get("reuses"),
+            "views": metrics.get("views"),
+            "followers": metrics.get("followers"),
+            "zone": raw.get("zone"),
+        }
+    )
+    return org
+
+
 def _slim_organization_detail(raw: dict[str, Any]) -> dict[str, Any]:
     metrics = raw.get("metrics") if isinstance(raw.get("metrics"), dict) else {}
     org = _slim_org(raw) or {}
@@ -240,6 +267,7 @@ class DataGouvClient:
         self.settings = settings
         self.http = http
         self._cache = AsyncTTLCache(settings.cache_maxsize, settings.cache_ttl)
+        self._org_catalog_cache = AsyncTTLCache(maxsize=1, ttl=6 * 3600)
 
     # ------------------------------------------------------------------ #
     # Transport
@@ -420,6 +448,86 @@ class DataGouvClient:
     # ------------------------------------------------------------------ #
     # Organisations
     # ------------------------------------------------------------------ #
+    async def _org_catalog(self) -> list[dict[str, Any]]:
+        """Catalogue complet des organisations (mis en cache une heure).
+
+        L'API amont ne gere pas la recherche par prefixe (``biodiv`` ne renvoie
+        rien alors que ``biodiversite`` fonctionne). Pour la recherche en direct,
+        on indexe donc toutes les organisations une fois, puis on filtre par
+        sous-chaine sans tenir compte des accents.
+        """
+
+        async def load() -> list[dict[str, Any]]:
+            page_size = 1000
+            first = await self._get(
+                "2/organizations/search/",
+                {"page": 1, "page_size": page_size, "sort": "-datasets"},
+            )
+            total = int(first.get("total") or 0)
+            rows = [row for row in first.get("data") or [] if isinstance(row, dict)]
+            pages = min(10, math.ceil(total / page_size))
+            if pages > 1:
+                batches = await asyncio.gather(
+                    *(
+                        self._get(
+                            "2/organizations/search/",
+                            {"page": page, "page_size": page_size, "sort": "-datasets"},
+                        )
+                        for page in range(2, pages + 1)
+                    )
+                )
+                for batch in batches:
+                    rows.extend(
+                        row for row in batch.get("data") or [] if isinstance(row, dict)
+                    )
+            return rows
+
+        return await self._org_catalog_cache.get_or_create("catalog", load)
+
+    async def warm_organization_catalog(self) -> None:
+        """Precharge le catalogue pour que la recherche en direct soit immediate."""
+        try:
+            await self._org_catalog()
+        except DataGouvError:
+            # Le prechargement est un confort : une erreur ne doit pas bloquer l'API.
+            return
+
+    async def _search_org_catalog(
+        self,
+        query: str,
+        page: int,
+        page_size: int,
+        sort: str | None,
+    ) -> dict[str, Any]:
+        catalog = await self._org_catalog()
+        needle = _normalize_text(query)
+        items: list[dict[str, Any]] = []
+
+        for row in catalog:
+            haystack = " ".join(
+                _normalize_text(row.get(field)) for field in ("name", "acronym", "slug")
+            )
+            if needle and needle in haystack:
+                items.append(_slim_org_full(row))
+
+        if sort == "-followers":
+            items.sort(key=lambda org: org.get("followers") or 0, reverse=True)
+        elif sort == "-created":
+            items.sort(key=lambda org: org.get("created_at") or "", reverse=True)
+        else:
+            items.sort(key=lambda org: org.get("datasets_count") or 0, reverse=True)
+
+        total = len(items)
+        start = (page - 1) * page_size
+        return {
+            "query": query,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "pages": max(1, -(-total // page_size)),
+            "data": items[start : start + page_size],
+        }
+
     async def search_organizations(
         self,
         query: str | None = None,
@@ -436,27 +544,17 @@ class DataGouvClient:
             params["sort"] = sort
 
         raw = await self._get("2/organizations/search/", params)
-        items: list[dict[str, Any]] = []
-        for row in raw.get("data") or []:
-            if not isinstance(row, dict):
-                continue
-            org = _slim_org(row) or {}
-            metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
-            org.update(
-                {
-                    "description": row.get("description"),
-                    "created_at": row.get("created_at"),
-                    "last_modified": row.get("last_modified"),
-                    "datasets_count": metrics.get("datasets"),
-                    "reuses_count": metrics.get("reuses"),
-                    "views": metrics.get("views"),
-                    "followers": metrics.get("followers"),
-                    "zone": row.get("zone"),
-                }
-            )
-            items.append(org)
-
+        items = [
+            _slim_org_full(row)
+            for row in raw.get("data") or []
+            if isinstance(row, dict)
+        ]
         total = int(raw.get("total") or len(items))
+
+        # Repli sur le catalogue local pour les recherches partielles.
+        if query and total == 0:
+            return await self._search_org_catalog(query, page, page_size, sort)
+
         return {
             "query": query,
             "page": page,

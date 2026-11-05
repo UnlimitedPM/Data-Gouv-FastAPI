@@ -13,6 +13,7 @@ from components.formatting import (
     license_label,
     producer_label,
 )
+from streamlit_searchbox import st_searchbox
 
 SORT_OPTIONS: dict[str, str | None] = {
     "Pertinence": None,
@@ -51,11 +52,15 @@ def render() -> None:
 
     with st.container(border=True):
         row1 = st.columns([2.4, 1.2, 1])
-        query = row1[0].text_input(
-            "Recherche",
-            placeholder="ex : transport, logement, énergie, communes…",
-            key="explore_query",
-        )
+        with row1[0]:
+            query = st_searchbox(
+                api.suggest_datasets,
+                label="Recherche en direct",
+                placeholder="ex : transport, logement, énergie, communes…",
+                default_use_searchterm=True,
+                debounce=300,
+                key="explore_searchbox",
+            ) or ""
         sort_label = row1[1].selectbox("Trier par", list(SORT_OPTIONS), key="explore_sort")
         page_size = row1[2].selectbox("Par page", [12, 24, 48], index=1, key="explore_size")
 
@@ -78,6 +83,11 @@ def render() -> None:
             format_func=lambda value: "Toutes" if value == "Toutes" else license_label(value),
             key="explore_license",
         )
+
+    query = str(query).strip()
+    if query and len(query) < 2:
+        st.info("Tapez au moins deux caractères pour lancer la recherche.")
+        return
 
     signature = (query, sort_label, page_size, family, producer, license_value)
     if st.session_state.get("explore_signature") != signature:

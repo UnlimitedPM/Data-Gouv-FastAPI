@@ -21,6 +21,7 @@ from components.formatting import (
     initials,
     truncate,
 )
+from streamlit_searchbox import st_searchbox
 
 
 def _org_banner_html(organization: dict[str, Any]) -> str:
@@ -115,11 +116,16 @@ def _render_detail(organization_id: str) -> None:
 
 def _render_list() -> None:
     row = st.columns([3, 1])
-    query = row[0].text_input(
-        "Rechercher une organisation",
-        placeholder="ex : ministère, commune, INSE…",
-        key="org_query",
-    )
+    with row[0]:
+        query = st_searchbox(
+            api.suggest_organizations,
+            label="Recherche en direct",
+            placeholder="ex : ministère, commune, biodiversité…",
+            default_use_searchterm=True,
+            debounce=300,
+            key="org_searchbox",
+        ) or ""
+    query = str(query).strip()
     sort_label = row[1].selectbox(
         "Trier par", ["Plus de jeux de données", "Plus récentes", "Plus suivies"], key="org_sort"
     )
@@ -128,6 +134,10 @@ def _render_list() -> None:
         "Plus récentes": "-created",
         "Plus suivies": "-followers",
     }.get(sort_label)
+
+    if query and len(query) < 2:
+        st.info("Tapez au moins deux caractères pour lancer la recherche.")
+        return
 
     try:
         with st.spinner("Recherche d'organisations…"):

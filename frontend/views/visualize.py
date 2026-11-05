@@ -18,6 +18,8 @@ from components.charts import (
     build_custom_figure,
     categorical_columns,
     correlation_heatmap,
+    geographic_columns,
+    map_figure,
     numeric_columns,
 )
 from components.formatting import (
@@ -33,6 +35,138 @@ def _frame_from_preview(payload: dict[str, Any]) -> pd.DataFrame:
     columns = [column.get("name", "") for column in payload.get("columns") or []]
     rows = payload.get("rows") or []
     return pd.DataFrame(rows, columns=columns)
+
+
+def _column_kind(series: pd.Series) -> str:
+    if pd.api.types.is_numeric_dtype(series):
+        return "number"
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return "date"
+    sample = series.dropna().astype(str).head(200)
+    if not sample.empty:
+        try:
+            parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
+        except (TypeError, ValueError):
+            parsed = pd.to_datetime(sample, errors="coerce")
+        if parsed.notna().mean() >= 0.8:
+            return "date"
+    return "text"
+
+
+def _filter_display(spec: Any) -> str:
+    if isinstance(spec, tuple) and len(spec) == 2 and spec[0] == "contains":
+        return f"contient « {spec[1]} »"
+    if isinstance(spec, tuple) and len(spec) == 2 and hasattr(spec[0], "isoformat"):
+        return f"du {spec[0]} au {spec[1]}"
+    if isinstance(spec, tuple) and len(spec) == 2:
+        low = f"{spec[0]:,.2f}".replace(",", " ").replace(".", ",")
+        high = f"{spec[1]:,.2f}".replace(",", " ").replace(".", ",")
+        return f"entre {low} et {high}"
+    if isinstance(spec, list):
+        shown = ", ".join(str(value) for value in spec[:5])
+        return shown + ("…" if len(spec) > 5 else "")
+    return str(spec)
+
+
+def _apply_filters(frame: pd.DataFrame, active: dict[str, Any]) -> pd.DataFrame:
+    result = frame
+    for column, spec in active.items():
+        if column not in result.columns:
+            continue
+        series = result[column]
+        if isinstance(spec, tuple) and len(spec) == 2 and spec[0] == "contains":
+            result = result[series.astype(str).str.contains(str(spec[1]), case=False, na=False)]
+        elif isinstance(spec, list):
+            result = result[series.astype(str).isin([str(value) for value in spec])]
+        elif isinstance(spec, tuple) and len(spec) == 2 and isinstance(spec[0], (int, float)):
+            numbers = pd.to_numeric(series, errors="coerce")
+            result = result[numbers.between(float(spec[0]), float(spec[1]))]
+        elif isinstance(spec, tuple) and len(spec) == 2:
+            dates = pd.to_datetime(series, errors="coerce").dt.date
+            result = result[(dates >= spec[0]) & (dates <= spec[1])]
+    return result
+
+
+def _render_filters(
+    frame: pd.DataFrame, dataset_id: str, resource_id: str
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    state_key = f"table-filters::{dataset_id}::{resource_id}"
+    active: dict[str, Any] = st.session_state.setdefault(state_key, {})
+
+    with st.expander("🔎 Filtrer les lignes", expanded=bool(active)):
+        st.caption(
+            "Les filtres s'appliquent à l'aperçu, aux graphiques et aux corrélations. "
+            "Le profil statistique reste calculé sur le fichier complet."
+        )
+        controls = st.columns([2, 2.4, 1])
+        column = controls[0].selectbox(
+            "Colonne", [str(name) for name in frame.columns], key=f"filter-column::{state_key}"
+        )
+        series = frame[column]
+        kind = _column_kind(series)
+        spec: Any = None
+
+        if kind == "number":
+            numbers = pd.to_numeric(series, errors="coerce").dropna()
+            if numbers.empty:
+                controls[1].info("Aucune valeur numérique exploitable.")
+            else:
+                low, high = float(numbers.min()), float(numbers.max())
+                if low == high:
+                    controls[1].number_input("Valeur", value=low, disabled=True)
+                    spec = (low, high)
+                else:
+                    step = (high - low) / 200
+                    spec = controls[1].slider(
+                        "Plage de valeurs",
+                        low,
+                        high,
+                        (low, high),
+                        step=step,
+                        key=f"filter-value::{state_key}::{column}",
+                    )
+        elif kind == "date":
+            dates = pd.to_datetime(series, errors="coerce").dropna()
+            if dates.empty:
+                controls[1].info("Aucune date exploitable.")
+            else:
+                selection = controls[1].date_input(
+                    "Période",
+                    value=(dates.min().date(), dates.max().date()),
+                    key=f"filter-value::{state_key}::{column}",
+                )
+                if isinstance(selection, tuple) and len(selection) == 2:
+                    spec = selection
+        else:
+            values = sorted({str(value) for value in series.dropna().unique()})
+            if len(values) <= 50:
+                spec = controls[1].multiselect(
+                    "Valeurs à garder",
+                    values,
+                    key=f"filter-value::{state_key}::{column}",
+                )
+            else:
+                text = controls[1].text_input(
+                    "Contient", key=f"filter-value::{state_key}::{column}"
+                )
+                if text.strip():
+                    spec = ("contains", text.strip())
+
+        add_clicked = controls[2].button("Ajouter", key=f"filter-add::{state_key}::{column}")
+        if add_clicked and spec:
+            active[column] = spec
+            st.rerun()
+
+        if active:
+            st.markdown("**Filtres actifs**")
+            for name in list(active):
+                row = st.columns([5, 1])
+                row[0].caption(f"{name} : {_filter_display(active[name])}")
+                if row[1].button("Retirer", key=f"filter-remove::{state_key}::{name}"):
+                    active.pop(name, None)
+                    st.rerun()
+
+    return _apply_filters(frame, active), active
 
 
 def _render_empty_state() -> None:
@@ -66,7 +200,7 @@ def _render_preview_tab(frame: pd.DataFrame, payload: dict[str, Any], dataset_id
     source = str(payload.get("source", "") or "")
     source_label = "Parquet" if source.startswith("parquet") else "Fichier"
     info = st.columns(4)
-    info[0].metric("Lignes affichées", human_number(payload.get("rows_loaded")))
+    info[0].metric("Lignes affichées", human_number(len(frame)))
     info[1].metric("Colonnes", human_number(len(frame.columns)))
     info[2].metric("Source", source_label, help=source)
     info[3].metric("Tronqué", "Oui" if payload.get("truncated") else "Non")
@@ -86,6 +220,17 @@ def _render_preview_tab(frame: pd.DataFrame, payload: dict[str, Any], dataset_id
 
 
 def _render_charts_tab(frame: pd.DataFrame) -> None:
+    geo = geographic_columns(frame)
+    if geo:
+        st.markdown("#### Carte interactive")
+        st.caption(
+            f"Colonnes détectées : {geo[0]} (latitude) et {geo[1]} (longitude). "
+            "Cliquez pour explorer, zoomez avec la molette."
+        )
+        figure_map = map_figure(frame, geo[0], geo[1])
+        if figure_map is not None:
+            st.plotly_chart(figure_map, width="stretch")
+
     figures = auto_figures(frame)
     if not figures:
         st.info(
@@ -180,7 +325,8 @@ def _display_value(value: Any) -> str:
 def _render_profile_tab(dataset_id: str, resource_id: str) -> None:
     st.caption(
         "Le profil est calculé côté backend sur un échantillon large (20 000 lignes "
-        "par défaut) : valeurs manquantes, unicité, statistiques et valeurs fréquentes."
+        "par défaut) : valeurs manquantes, unicité, statistiques et valeurs fréquentes. "
+        "Il porte sur le fichier complet et ignore les filtres locaux."
     )
     if not st.checkbox("Calculer le profil statistique", key=f"profile-toggle-{resource_id}"):
         return
@@ -249,7 +395,10 @@ def _render_metadata_tab(dataset: dict[str, Any]) -> None:
         ("Type d'accès", dataset.get("access_type") or "—"),
     ]
     st.dataframe(
-        pd.DataFrame(details, columns=["Champ", "Valeur"]),
+        pd.DataFrame(
+            [(label, _display_value(value)) for label, value in details],
+            columns=["Champ", "Valeur"],
+        ),
         width="stretch",
         hide_index=True,
     )
@@ -357,6 +506,20 @@ def render() -> None:
         return
 
     frame = _frame_from_preview(preview)
+    frame, active_filters = _render_filters(frame, dataset_id, resource_id)
+    if active_filters:
+        st.caption(
+            f"{len(frame):,} lignes conservées sur les lignes chargées après filtres."
+            .replace(",", " ")
+        )
+    if frame.empty:
+        st.warning(
+            "Aucune ligne ne correspond aux filtres actifs. "
+            "Retirez un filtre pour continuer l'exploration."
+        )
+        _render_metadata_tab(dataset)
+        return
+
     tabs = st.tabs(
         ["📋 Aperçu", "📊 Graphiques", "🔗 Corrélations", "🧮 Profil des colonnes", "ℹ️ Métadonnées"]
     )

@@ -14,14 +14,19 @@ Streamlit** pour rechercher, prévisualiser et visualiser les jeux de données.
 - **Tableau de bord** : volumes globaux (jeux de données, organisations,
   réutilisations, services), répartition par famille de formats, type de
   producteur, licence et thématique.
-- **Recherche** : mot-clé + filtres (famille de formats, producteur, licence),
-  tri (récents, mis à jour, vus, suivis), pagination. L'API v2 plafonne
-  l'affichage à 10 000 résultats, ce que l'interface signale clairement.
+- **Recherche en direct** : les résultats se mettent à jour pendant la frappe
+  (composant `streamlit-searchbox`, suggestions + debounce) — pas besoin d'appuyer
+  sur Entrée. Filtres famille de formats, producteur et licence, tri et pagination.
+  L'API v2 plafonne l'affichage à 10 000 résultats, ce que l'interface signale.
 - **Fiche jeu de données** : description, organisation, métriques, tags,
   ressources et liens officiels.
 - **Aperçu tabulaire** : lecture CSV / TSV / JSON / GeoJSON / Excel / Parquet,
   tableau interactif, export CSV. Les fichiers **Parquet pré-calculés par
   data.gouv.fr** sont utilisés en priorité.
+- **Filtres locaux** : filtrer les lignes par plage numérique, période ou valeurs
+  catégorielles, puis explorer les graphiques et corrélations sur le sous-ensemble.
+- **Carte interactive** : détection automatique de colonnes latitude/longitude et
+  affichage des points sur un fond OpenStreetMap.
 - **Graphiques automatiques** : distributions numériques, répartitions
   catégorielles, séries temporelles, nuages de points, corrélations.
 - **Profil statistique** : valeurs manquantes, unicité, min/moyenne/médiane/max,
@@ -233,13 +238,14 @@ Les composants vivent dans `frontend/components/` et réutilisent les classes CS
 - Recherche plafonnée à **10 000 résultats** par l'API v2 de data.gouv.fr.
 - Formats supportés : CSV/TSV, JSON/GeoJSON/NDJSON, Excel, Parquet. Pas encore de ZIP, XML complexe ou SQL.
 - Cache **en mémoire** : perdu au redémarrage du backend.
-- Graphiques automatiques simples (pas de filtrage dynamique des séries).
+- Graphiques automatiques simples ; les filtres locaux portent sur les lignes
+  chargées dans le navigateur, pas sur le fichier complet.
 - Interface non officielle ; les données restent soumises aux licences de chaque producteur.
 
 ## 🔭 Pistes pour la suite
 
-- Filtres interactifs sur les colonnes et séries (période, territoire, catégorie).
-- Cartographie (GeoJSON / contours administratifs).
+- Filtres combinés persistants et partage de vues par URL.
+- Cartographie avancée (GeoJSON / contours administratifs, choroplèthes).
 - Export PNG/PDF, partage de vues par URL.
 - Cache Redis + déploiement Docker / reverse proxy.
 - Comparaison de plusieurs jeux de données.

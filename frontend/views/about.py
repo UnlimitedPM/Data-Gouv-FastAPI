@@ -18,10 +18,13 @@ def render() -> None:
         et propose :
 
         - un **tableau de bord** avec les volumes et répartitions globales ;
-        - une **recherche** par mot-clé, format, producteur et licence ;
+        - une **recherche en direct** (résultats pendant la frappe) par mot-clé,
+          format, producteur et licence ;
         - une **fiche détaillée** pour chaque jeu de données ;
         - un **aperçu des fichiers** tabulaires (CSV, JSON, Excel, Parquet) ;
-        - des **graphiques automatiques** (distributions, catégories, séries temporelles) ;
+        - des **filtres locaux** par plage numérique, période ou modalités ;
+        - des **graphiques automatiques** (distributions, catégories, séries temporelles),
+          une **carte interactive** si des coordonnées sont détectées ;
         - un **profil statistique** des colonnes et une matrice de corrélations ;
         - un **annuaire des organisations** productrices.
 
@@ -77,12 +80,13 @@ def render() -> None:
         - Le cache est en mémoire : il est perdu au redémarrage du backend.
         - Les charts sont générés automatiquement à partir des types détectés :
           ils restent volontairement simples.
+        - Les filtres locaux et la carte portent sur les lignes chargées dans
+          l'aperçu, pas sur l'intégralité du fichier distant.
 
         ### Pistes pour la suite
 
-        - Export des visualisations en PNG / CSV et partage par URL.
-        - Filtres dynamiques sur les colonnes (période, territoire, catégories).
-        - Cartographie des données géographiques (GeoJSON, contours de communes).
+        - Export des visualisations en PNG / CSV et partage de vues par URL.
+        - Filtres combinés persistants et cartographie GeoJSON (contours, choroplèthes).
         - Cache persistant (Redis) et déploiement Docker.
         - Comparaison de plusieurs jeux de données.
         """

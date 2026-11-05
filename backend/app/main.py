@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -32,9 +34,14 @@ async def lifespan(app: FastAPI):
     )
     app.state.http = http
     app.state.datagouv = DataGouvClient(settings, http)
+    # Precharge le catalogue d'organisations sans bloquer le demarrage.
+    warmup = asyncio.create_task(app.state.datagouv.warm_organization_catalog())
     try:
         yield
     finally:
+        warmup.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await warmup
         await http.aclose()
 
 

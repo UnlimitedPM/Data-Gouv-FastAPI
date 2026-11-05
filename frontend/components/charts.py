@@ -281,6 +281,90 @@ def _looks_like_identifier(name: str) -> bool:
     )
 
 
+GEO_LAT_HINTS = {"lat", "latitude", "ylat"}
+GEO_LON_HINTS = {"lon", "lng", "long", "longitude", "xlon"}
+
+
+def _name_tokens(name: object) -> set[str]:
+    return {token for token in re.split(r"[^a-z0-9]+", str(name).lower()) if token}
+
+
+def geographic_columns(frame: pd.DataFrame) -> tuple[str, str] | None:
+    """Detecte une paire latitude/longitude exploitable pour une carte."""
+    lat_column: str | None = None
+    lon_column: str | None = None
+
+    for column in frame.columns:
+        tokens = _name_tokens(column)
+        if lat_column is None and tokens & GEO_LAT_HINTS:
+            lat_column = str(column)
+        elif lon_column is None and tokens & GEO_LON_HINTS:
+            lon_column = str(column)
+
+    if not lat_column or not lon_column:
+        return None
+
+    lat_values = pd.to_numeric(frame[lat_column], errors="coerce")
+    lon_values = pd.to_numeric(frame[lon_column], errors="coerce")
+    valid = lat_values.between(-90, 90) & lon_values.between(-180, 180)
+    if int(valid.sum()) < 2:
+        return None
+
+    return lat_column, lon_column
+
+
+def map_figure(
+    frame: pd.DataFrame,
+    lat_column: str,
+    lon_column: str,
+    max_points: int = 5_000,
+) -> go.Figure | None:
+    """Carte de points a partir de colonnes latitude/longitude."""
+    subset = pd.DataFrame(
+        {
+            lat_column: pd.to_numeric(frame[lat_column], errors="coerce"),
+            lon_column: pd.to_numeric(frame[lon_column], errors="coerce"),
+        }
+    )
+    subset = subset.dropna()
+    subset = subset[
+        subset[lat_column].between(-90, 90) & subset[lon_column].between(-180, 180)
+    ]
+    if subset.empty:
+        return None
+    subset = subset.head(max_points)
+
+    hover_column = next(
+        (
+            column
+            for column in categorical_columns(frame, max_cardinality=30)
+            if column not in {lat_column, lon_column}
+        ),
+        None,
+    )
+    columns = [lat_column, lon_column] + ([hover_column] if hover_column else [])
+    plot_frame = frame.loc[subset.index, columns].copy()
+
+    figure = px.scatter_map(
+        plot_frame,
+        lat=lat_column,
+        lon=lon_column,
+        hover_name=hover_column,
+        center={
+            "lat": float(subset[lat_column].mean()),
+            "lon": float(subset[lon_column].mean()),
+        },
+        zoom=4,
+        map_style="open-street-map",
+        height=520,
+        opacity=0.75,
+        color_discrete_sequence=[BLUE],
+        title=f"Carte — {len(subset):,} points géolocalisés".replace(",", " "),
+    )
+    figure.update_layout(margin={"l": 0, "r": 0, "t": 44, "b": 0})
+    return figure
+
+
 def auto_figures(frame: pd.DataFrame, max_figures: int = 6) -> list[go.Figure]:
     """Genere une selection de figures pertinentes pour un DataFrame."""
     if frame.empty:
