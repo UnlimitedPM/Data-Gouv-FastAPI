@@ -37,7 +37,7 @@ def _org_banner_html(organization: dict[str, Any]) -> str:
         f'<span class="dfe-pill dfe-pill--green">{esc(badge_label(badge))}</span>'
         for badge in (organization.get("badges") or [])[:4]
     )
-    description, more = description_block(
+    description_html = description_block(
         organization.get("description"), 620, "Pas de description fournie."
     )
     return compact_html(
@@ -50,8 +50,7 @@ def _org_banner_html(organization: dict[str, Any]) -> str:
           <p class="dfe-card__meta">
             {esc(organization.get('acronym') or '')} · créée le {esc(format_date(organization.get('created_at')))}
           </p>
-          <p class="dfe-card__desc">{description}</p>
-          {more}
+          {description_html}
           <div class="dfe-tags">{badges}</div>
           <div class="dfe-metrics">
             <div>
