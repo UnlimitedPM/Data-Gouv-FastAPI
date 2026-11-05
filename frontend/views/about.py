@@ -27,7 +27,9 @@ def render() -> None:
         - des **graphiques automatiques** (distributions, catégories, séries temporelles) ;
         - une **carte interactive** dans l'onglet **🗺️ Carte** de *Visualiser* :
           points latitude/longitude ou carte choroplèthe GeoJSON ;
-        - un **profil statistique** des colonnes et une matrice de corrélations ;
+        - un **profil statistique** des colonnes ;
+        - des **corrélations expliquées** : classement des liens, matrice annotée et
+          nuage de points avec tendance, R² et phrase d'interprétation ;
         - une page **Comparer** pour rapprocher deux jeux de données ;
         - des **liens partageables** qui conservent dataset, fichier et filtres ;
         - un **annuaire des organisations** productrices.

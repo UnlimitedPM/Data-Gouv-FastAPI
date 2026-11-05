@@ -16,14 +16,19 @@ from components.cards import (
     resource_label,
 )
 from components.charts import (
+    analysable_numeric_columns,
     auto_figures,
     build_custom_figure,
     categorical_columns,
     correlation_heatmap,
+    correlation_pairs,
+    correlation_ranking,
+    correlation_strength,
     geographic_columns,
     geojson_choropleth,
     map_figure,
     numeric_columns,
+    scatter_with_trend,
 )
 from components.formatting import (
     format_date,
@@ -388,9 +393,12 @@ def _render_charts_tab(frame: pd.DataFrame) -> None:
 
 
 def _render_correlation_tab(frame: pd.DataFrame) -> None:
-    numeric = numeric_columns(frame)
+    numeric = analysable_numeric_columns(frame)
     if len(numeric) < 2:
-        st.info("Il faut au moins deux colonnes numériques pour calculer des corrélations.")
+        st.info(
+            "Il faut au moins deux colonnes numériques exploitables (hors identifiants, "
+            "colonnes constantes ou trop incomplètes) pour calculer des corrélations."
+        )
         return
     if len(frame) < 3:
         st.info(
@@ -398,28 +406,89 @@ def _render_correlation_tab(frame: pd.DataFrame) -> None:
             "pas significatives. Chargez davantage de lignes ou choisissez un autre fichier."
         )
         return
+    if len(frame) < 10:
+        st.warning(
+            f"Seulement {len(frame)} lignes analysées : les corrélations sont indicatives."
+        )
 
-    selected = numeric[:15]
+    selected = st.multiselect(
+        "Colonnes numériques à comparer",
+        numeric,
+        default=numeric[:8],
+        max_selections=12,
+        key="corr-columns",
+    )
+    if len(selected) < 2:
+        st.info("Sélectionnez au moins deux colonnes pour lancer l'analyse.")
+        return
+
     numeric_frame = frame[selected].apply(pd.to_numeric, errors="coerce")
     matrix = numeric_frame.corr()
-    values = [
-        [None if pd.isna(value) else round(float(value), 3) for value in row]
-        for row in matrix.to_numpy()
-    ]
-    st.plotly_chart(correlation_heatmap(selected, values), width="stretch")
+    pairs = correlation_pairs(matrix, limit=10)
+    if not pairs:
+        st.info("Pas assez de valeurs communes pour calculer une corrélation.")
+        return
 
-    st.markdown("#### Nuage de points")
-    controls = st.columns(2)
-    x_column = controls[0].selectbox("X", selected, key="corr_x")
-    y_column = controls[1].selectbox("Y", selected, index=min(1, len(selected) - 1), key="corr_y")
-    figure = build_custom_figure(frame, "Nuage de points", x_column, y_column)
+    st.markdown("#### Les liens les plus marqués")
+    st.caption(
+        "Chaque barre résume le lien entre deux colonnes : **+1** = elles évoluent "
+        "ensemble, **-1** = en sens inverse, **0** = aucun lien linéaire."
+    )
+    if len(pairs) > 1:
+        ranking = correlation_ranking(pairs)
+        if ranking is not None:
+            st.plotly_chart(ranking, width="stretch")
+    else:
+        st.info(
+            "Deux colonnes seulement sont analysées : leur relation est détaillée "
+            "dans le nuage de points ci-dessous."
+        )
+
+    with st.expander("Voir la matrice complète", expanded=False):
+        values = [
+            [None if pd.isna(value) else round(float(value), 3) for value in row]
+            for row in matrix.to_numpy()
+        ]
+        st.plotly_chart(correlation_heatmap(selected, values), width="stretch")
+
+    st.markdown("#### Explorer une paire en détail")
+    options = [pair["pair"] for pair in pairs]
+    choice = st.selectbox("Paire de variables", options, key="corr-pair")
+    pair = pairs[options.index(choice)]
+    figure, stats = scatter_with_trend(frame, pair["x"], pair["y"])
+
     if figure is not None:
         st.plotly_chart(figure, width="stretch")
+    if stats is not None:
+        strength, direction = correlation_strength(stats["r"])
+        if abs(stats["r"]) < 0.2:
+            label = "négligeable"
+            comment = "Aucun lien linéaire net ne se dégage entre ces deux colonnes."
+        else:
+            label = f"{strength} {direction}"
+            verb = "augmenter" if stats["r"] > 0 else "diminuer"
+            comment = (
+                f"Quand **{pair['x']}** augmente, **{pair['y']}** tend à {verb}."
+            )
+        st.info(
+            f"Corrélation **{label}** : r = {stats['r']:+.2f}, "
+            f"R² = {stats['r2']:.2f}, sur {human_number(stats['n'])} points. {comment}"
+        )
 
-    st.caption(
-        "La corrélation de Pearson mesure un lien linéaire entre deux variables, "
-        "pas une causalité."
-    )
+    with st.expander("Comment lire ces graphiques ?", expanded=False):
+        st.markdown(
+            """
+            - **r** (coefficient de Pearson) va de **-1 à +1**.
+            - **+1** : les deux variables augmentent ensemble (corrélation positive parfaite).
+            - **-1** : quand l'une augmente, l'autre diminue (corrélation négative parfaite).
+            - **0** : pas de lien linéaire.
+            - **R²** indique la part de la variation d'une variable expliquée par l'autre.
+              Par exemple, R² = 0,64 signifie que 64 % de la variation est associée à l'autre
+              variable.
+            - Une corrélation n'est **pas une causalité** : un troisième facteur peut être
+              à l'origine du lien, ou le lien peut être fortuit sur un petit échantillon.
+            """
+        )
 
 
 def _display_value(value: Any) -> str:

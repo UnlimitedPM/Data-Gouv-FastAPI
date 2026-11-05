@@ -38,7 +38,9 @@ Streamlit** pour rechercher, prévisualiser et visualiser les jeux de données.
 - **Graphiques automatiques** : distributions numériques, répartitions
   catégorielles, séries temporelles, nuages de points, corrélations.
 - **Profil statistique** : valeurs manquantes, unicité, min/moyenne/médiane/max,
-  valeurs fréquentes, matrice de corrélation.
+  valeurs fréquentes.
+- **Corrélations lisibles** : classement des paires les plus liées, matrice annotée,
+  nuage de points avec droite de tendance, R² et interprétation en français.
 - **Annuaire des organisations** avec leurs derniers jeux de données.
 - **Cache Redis optionnel** et déploiement **Docker Compose** (Redis + API + UI).
 - **Header / footer** et charte graphique commune (bleu Marianne).
