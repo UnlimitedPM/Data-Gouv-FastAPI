@@ -9,6 +9,7 @@ import streamlit as st
 
 from .formatting import (
     badge_label,
+    clean_multiline,
     compact_html,
     esc,
     format_date,
@@ -37,6 +38,23 @@ def kpi_grid(items: list[dict[str, str]]) -> None:
     st.markdown(compact_html(f'<div class="dfe-kpi-grid">{cells}</div>'), unsafe_allow_html=True)
 
 
+def description_block(
+    description: object, length: int, default: str
+) -> tuple[str, str]:
+    """Retourne (texte court échappé, bloc HTML « Lire plus » ou vide)."""
+    full = clean_multiline(description or default)
+    short = truncate(full, length)
+    if len(full) <= length:
+        return esc(short), ""
+
+    full_html = esc(full).replace("\n", "<br />")
+    more = compact_html(
+        f'<details class="dfe-more"><summary>Lire plus</summary>'
+        f'<div class="dfe-more__text">{full_html}</div></details>'
+    )
+    return esc(short), more
+
+
 def _format_pills(
     formats: list[str], resources_count: int = 0, limit: int = 4
 ) -> str:
@@ -55,7 +73,9 @@ def dataset_card_html(dataset: dict[str, Any]) -> str:
     organization = dataset.get("organization") or {}
     org_name = organization.get("acronym") or organization.get("name") or "Producteur inconnu"
     metrics = dataset.get("metrics") or {}
-    description = truncate(dataset.get("description") or "Pas de description fournie.", 230)
+    description, more = description_block(
+        dataset.get("description"), 230, "Pas de description fournie."
+    )
     page = dataset.get("page") or "https://www.data.gouv.fr"
     updated = dataset.get("last_update") or dataset.get("last_modified")
     tags = dataset.get("tags") or []
@@ -73,7 +93,8 @@ def dataset_card_html(dataset: dict[str, Any]) -> str:
           <h3 class="dfe-card__title">
             <a href="{esc(page)}" target="_blank" rel="noopener">{esc(dataset.get('title'))}</a>
           </h3>
-          <p class="dfe-card__desc">{esc(description)}</p>
+          <p class="dfe-card__desc">{description}</p>
+          {more}
           <div class="dfe-tags">{_format_pills(dataset.get('formats') or [], int(dataset.get('resources_count') or 0))}{tag_pills}</div>
           <div class="dfe-metrics">
             <div>
@@ -121,7 +142,9 @@ def organization_card_html(organization: dict[str, Any]) -> str:
         f'<span class="dfe-pill dfe-pill--green">{esc(badge_label(badge))}</span>'
         for badge in badges[:3]
     )
-    description = truncate(organization.get("description") or "Pas de description.", 170)
+    description, more = description_block(
+        organization.get("description"), 170, "Pas de description."
+    )
     page = organization.get("page") or "https://www.data.gouv.fr"
 
     if logo:
@@ -144,7 +167,8 @@ def organization_card_html(organization: dict[str, Any]) -> str:
             </div>
             <div class="dfe-tags">{badge_pills}</div>
           </div>
-          <p class="dfe-card__desc">{esc(description)}</p>
+          <p class="dfe-card__desc">{description}</p>
+          {more}
           <div class="dfe-metrics">
             <div>
               <div class="dfe-metric__value">{esc(human_number(organization.get('datasets_count')))}</div>
@@ -187,6 +211,9 @@ def dataset_banner_html(dataset: dict[str, Any]) -> str:
     formats = _format_pills(
         dataset.get("formats") or [], int(dataset.get("resources_count") or 0)
     )
+    description, more = description_block(
+        dataset.get("description"), 560, "Pas de description fournie."
+    )
 
     return compact_html(
         f"""
@@ -202,7 +229,8 @@ def dataset_banner_html(dataset: dict[str, Any]) -> str:
                 · Fréquence {esc(frequency_label(dataset.get('frequency')))}
                 · {esc(license_label(dataset.get('license')))}
               </p>
-              <p class="dfe-card__desc">{esc(truncate(dataset.get('description') or 'Pas de description fournie.', 560))}</p>
+              <p class="dfe-card__desc">{description}</p>
+              {more}
               <div class="dfe-tags">{formats}{tags}</div>
               <div class="dfe-metrics">
                 <div>

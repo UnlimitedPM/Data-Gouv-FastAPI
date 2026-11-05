@@ -173,24 +173,33 @@ def relative_date(value: object) -> str:
     return f"il y a {days // 365} an" + ("s" if days >= 730 else "")
 
 
-def clean_text(value: object) -> str:
-    """Retire le balisage Markdown des descriptions data.gouv.fr."""
+def clean_multiline(value: object) -> str:
+    """Retire le balisage Markdown en conservant les paragraphes."""
     text = str(value or "")
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
     text = re.sub(r"https?://\S+", " ", text)
     text = re.sub(r"[#*_`>|~]+", " ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip(" -\u2022")
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    cleaned = "\n".join(lines).strip(" -\u2022")
+    return re.sub(r"\n{3,}", "\n\n", cleaned)
+
+
+def clean_text(value: object) -> str:
+    """Retire le balisage Markdown et compacte tout en une ligne."""
+    return " ".join(clean_multiline(value).split())
 
 
 def truncate(text: object, length: int = 240) -> str:
     if not text:
         return ""
-    cleaned = " ".join(clean_text(text).split())
+    cleaned = clean_text(text)
     if len(cleaned) <= length:
         return cleaned
-    return cleaned[: length - 1].rstrip() + "…"
+    cut = cleaned[: length - 1].rstrip()
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,;:") + "…"
 
 
 def license_label(value: object) -> str:

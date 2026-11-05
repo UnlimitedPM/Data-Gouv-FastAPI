@@ -20,7 +20,8 @@ def render() -> None:
         - un **tableau de bord** avec les volumes et répartitions globales ;
         - une **recherche en direct** (résultats pendant la frappe) par mot-clé,
           format, producteur et licence ;
-        - une **fiche détaillée** pour chaque jeu de données ;
+        - une **fiche détaillée** pour chaque jeu de données, avec un lien
+          **« Lire plus »** pour afficher la description intégrale ;
         - un **aperçu des fichiers** tabulaires (CSV, JSON, Excel, Parquet) ;
         - des **filtres locaux** par plage numérique, période ou modalités ;
         - des **graphiques automatiques** (distributions, catégories, séries temporelles) ;

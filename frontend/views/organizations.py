@@ -7,6 +7,7 @@ from typing import Any
 import api_client as api
 import streamlit as st
 from components.cards import (
+    description_block,
     empty_state,
     render_dataset_card,
     render_organization_card,
@@ -19,7 +20,6 @@ from components.formatting import (
     format_date,
     human_number,
     initials,
-    truncate,
 )
 from streamlit_searchbox import st_searchbox
 
@@ -37,6 +37,9 @@ def _org_banner_html(organization: dict[str, Any]) -> str:
         f'<span class="dfe-pill dfe-pill--green">{esc(badge_label(badge))}</span>'
         for badge in (organization.get("badges") or [])[:4]
     )
+    description, more = description_block(
+        organization.get("description"), 620, "Pas de description fournie."
+    )
     return compact_html(
         f"""
     <div class="dfe-card dfe-card--flat">
@@ -47,7 +50,8 @@ def _org_banner_html(organization: dict[str, Any]) -> str:
           <p class="dfe-card__meta">
             {esc(organization.get('acronym') or '')} · créée le {esc(format_date(organization.get('created_at')))}
           </p>
-          <p class="dfe-card__desc">{esc(truncate(organization.get('description') or 'Pas de description fournie.', 620))}</p>
+          <p class="dfe-card__desc">{description}</p>
+          {more}
           <div class="dfe-tags">{badges}</div>
           <div class="dfe-metrics">
             <div>

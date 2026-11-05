@@ -19,7 +19,8 @@ Streamlit** pour rechercher, prévisualiser et visualiser les jeux de données.
   sur Entrée. Filtres famille de formats, producteur et licence, tri et pagination.
   L'API v2 plafonne l'affichage à 10 000 résultats, ce que l'interface signale.
 - **Fiche jeu de données** : description, organisation, métriques, tags,
-  ressources et liens officiels.
+  ressources et liens officiels. Un lien **« Lire plus »** déplie le texte
+  intégral des descriptions, dans les cartes comme dans les fiches.
 - **Aperçu tabulaire** : lecture CSV / TSV / JSON / GeoJSON / Excel / Parquet,
   tableau interactif, export CSV. Les fichiers **Parquet pré-calculés par
   data.gouv.fr** sont utilisés en priorité.
