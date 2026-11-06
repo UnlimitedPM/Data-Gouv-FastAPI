@@ -6,7 +6,7 @@ import streamlit as st
 
 from .formatting import compact_html
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 
 
 def render_header(
@@ -26,7 +26,7 @@ def render_header(
               </div>
             </div>
             <div class="dfe-header__chips">
-              <span class="dfe-chip">API data.gouv.fr · v2</span>
+              <span class="dfe-chip">Catalogue local</span>
               <span class="dfe-chip">FastAPI</span>
               <span class="dfe-chip">Streamlit</span>
             </div>
@@ -52,9 +52,13 @@ def render_sidebar_brand() -> None:
     )
 
 
-def render_sidebar_status(ok: bool, detail: str = "") -> None:
-    dot = "dfe-dot" if ok else "dfe-dot dfe-dot--down"
-    label = "API connectée" if ok else "API hors ligne"
+def render_sidebar_status(ok: bool, detail: str = "", catalog_empty: bool = False) -> None:
+    if not ok:
+        dot, label = "dfe-dot dfe-dot--down", "API hors ligne"
+    elif catalog_empty:
+        dot, label = "dfe-dot dfe-dot--warn", "Catalogue vide"
+    else:
+        dot, label = "dfe-dot", "API connectée"
     st.markdown(
         compact_html(
             f"""
@@ -80,9 +84,9 @@ def render_footer() -> None:
             <div>
               <h4>DataFrance Explorer</h4>
               <p>
-                Première ébauche d'un explorateur de données publiques :
-                recherche, aperçu, statistiques et visualisations générées
-                automatiquement à partir de l'API officielle data.gouv.fr.
+                Explorateur de données publiques : recherche, aperçu,
+                statistiques et visualisations générées à partir d'un
+                instantané du catalogue data.gouv.fr stocké en base locale.
               </p>
             </div>
             <div>
@@ -96,9 +100,9 @@ def render_footer() -> None:
             <div>
               <h4>Stack technique</h4>
               <ul>
-                <li>Backend : FastAPI, httpx, pandas</li>
+                <li>Backend : FastAPI, SQLAlchemy, SQLite, pandas</li>
                 <li>Frontend : Streamlit, Plotly</li>
-                <li>Cache mémoire ou Redis côté backend</li>
+                <li>Ingestion hors ligne · cache TTL en mémoire</li>
               </ul>
             </div>
           </div>

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 
 from ...schemas import DatasetSearchResponse, OrganizationSearchResponse
-from ..deps import ClientDep
+from ..deps import CatalogDep
 
 router = APIRouter(prefix="/search", tags=["recherche"])
 
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/search", tags=["recherche"])
     summary="Rechercher des jeux de donnees",
 )
 async def search_datasets(
-    client: ClientDep,
+    catalog: CatalogDep,
     q: str | None = Query(None, description="Termes de recherche"),
     page: int = Query(1, ge=1, description="Numero de page"),
     page_size: int = Query(20, ge=1, le=100, description="Resultats par page"),
@@ -37,7 +37,7 @@ async def search_datasets(
     geozone: str | None = Query(None, description="Zone geographique"),
     granularity: str | None = Query(None, description="Granularite territoriale"),
 ) -> DatasetSearchResponse:
-    payload = await client.search_datasets(
+    payload = await catalog.search_datasets(
         query=q,
         page=page,
         page_size=page_size,
@@ -60,13 +60,13 @@ async def search_datasets(
     summary="Rechercher des organisations",
 )
 async def search_organizations(
-    client: ClientDep,
+    catalog: CatalogDep,
     q: str | None = Query(None, description="Termes de recherche"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     sort: str | None = Query(None, description="Tri : -datasets, -created, -views"),
 ) -> OrganizationSearchResponse:
-    payload = await client.search_organizations(
+    payload = await catalog.search_organizations(
         query=q, page=page, page_size=page_size, sort=sort
     )
     return OrganizationSearchResponse(**payload)

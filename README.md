@@ -1,11 +1,49 @@
 # 🇫🇷 DataFrance Explorer
 
 Prototype d'explorateur des données publiques françaises : **backend FastAPI** qui
-interroge l'API officielle [data.gouv.fr](https://www.data.gouv.fr) et **frontend
-Streamlit** pour rechercher, prévisualiser et visualiser les jeux de données.
+sert un catalogue [data.gouv.fr](https://www.data.gouv.fr) **ingéré dans une base
+locale** (SQLite par défaut), et **frontend Streamlit** pour rechercher,
+prévisualiser et visualiser les jeux de données.
 
-> Première ébauche fonctionnelle : la structure est volontairement modulaire pour
-> être enrichie facilement (nouvelles pages, nouveaux endpoints, nouveaux graphiques).
+> Le projet a d'abord servi de bac à sable FastAPI/Streamlit branché directement sur
+> l'API officielle. Il fonctionne désormais comme une petite application autonome :
+> une ingestion hors ligne remplit la base, puis l'API ne dépend plus du réseau
+> pour répondre. La structure reste volontairement modulaire pour être enrichie
+> facilement (nouvelles pages, nouveaux endpoints, nouveaux graphiques).
+
+### Pourquoi une base locale plutôt que l'API officielle à l'exécution ?
+
+- **Latence prévisible** : les requêtes SQL locales répondent en quelques
+  millisecondes, sans attendre un service distant ni subir ses ralentissements.
+- **Pas de plafond d'affichage** : l'API officielle v2 limite l'exploration à
+  10 000 résultats ; la base locale renvoie un total exact et pagine librement.
+- **Disponibilité** : le site continue de fonctionner si data.gouv.fr est
+  momentanément indisponible ou si la machine n'a pas Internet après l'ingestion.
+- **Pas de rate limiting** : une recherche en direct peut interroger le backend à
+  chaque frappe sans risquer de se faire limiter par l'API amont.
+- **Tests et développement déterministes** : les données ne changent pas entre deux
+  appels, ce qui rend les captures, les tests et le débogage reproductibles.
+- **Requêtes enrichies** : recherche accent-insensible, facettes et jointures sont
+  calculées côté base, sans multiplier les appels réseau.
+
+L'ingestion reste la seule étape qui contacte data.gouv.fr. Pour rafraîchir les
+données, on relance `python -m app.ingest` (voir plus bas).
+
+### Pourquoi pas Redis pour le moment ?
+
+Redis serait utile pour partager un cache entre plusieurs workers ou plusieurs
+machines. Ce n'est pas le besoin actuel :
+
+- un seul processus FastAPI et une base SQLite suffisent à ce prototype ;
+- ajouter Redis maintenant **masquerait** les vrais goulets d'étranglement des
+  requêtes SQL au lieu de les mesurer ;
+- cela ajouterait un service, un volume et une dépendance réseau à exploiter ;
+- le cache TTL en mémoire du processus est suffisant pour amortir les aperçus de
+  fichiers et les téléchargements répétés.
+
+Redis pourra revenir plus tard si le déploiement passe à plusieurs workers ou si
+les mesures montrent un besoin réel de cache partagé. Le code actuel n'en dépend
+pas et `redis` n'est plus dans les dépendances.
 
 ---
 
@@ -16,8 +54,9 @@ Streamlit** pour rechercher, prévisualiser et visualiser les jeux de données.
   producteur, licence et thématique.
 - **Recherche en direct** : les résultats se mettent à jour pendant la frappe
   (composant `streamlit-searchbox`, suggestions + debounce) — pas besoin d'appuyer
-  sur Entrée. Filtres famille de formats, producteur et licence, tri et pagination.
-  L'API v2 plafonne l'affichage à 10 000 résultats, ce que l'interface signale.
+  sur Entrée. Recherche accent-insensible, filtres famille de formats, producteur
+  et licence, tri et pagination. Le total vient de la base locale : pas de plafond
+  à 10 000 résultats, et la pagination est exacte.
 - **Fiche jeu de données** : description, organisation, métriques, tags,
   ressources et liens officiels. Un lien **« Lire plus »** déplie le texte
   intégral des descriptions, dans les cartes comme dans les fiches.
@@ -42,7 +81,10 @@ Streamlit** pour rechercher, prévisualiser et visualiser les jeux de données.
 - **Corrélations lisibles** : classement des paires les plus liées, matrice annotée,
   nuage de points avec droite de tendance, R² et interprétation en français.
 - **Annuaire des organisations** avec leurs derniers jeux de données.
-- **Cache Redis optionnel** et déploiement **Docker Compose** (Redis + API + UI).
+- **Cache TTL en mémoire** (sans Redis) et déploiement **Docker Compose** (API + UI
+  + volume SQLite).
+- **Ingestion reproductible** : un instantané du catalogue data.gouv.fr est chargé
+  dans SQLite, puis l'API travaille hors ligne.
 - **Header / footer** et charte graphique commune (bleu Marianne).
 
 ---
@@ -51,12 +93,16 @@ Streamlit** pour rechercher, prévisualiser et visualiser les jeux de données.
 
 ```mermaid
 flowchart LR
-    A["data.gouv.fr<br/>API v2 (+ repli v1)"] -->|HTTP JSON| B["Backend FastAPI<br/>proxy + cache TTL"]
-    B -->|HTTP JSON| C["Frontend Streamlit<br/>pages + composants Plotly"]
-    B --> D["pandas<br/>aperçu, profil, GeoJSON"]
-    B -.-> R["Redis (optionnel)<br/>cache partagé"]
-    C --> E["Navigateur"]
+    A["data.gouv.fr<br/>API v1 + v2"] -->|ingestion hors ligne| B["Base locale<br/>SQLite (ou PostgreSQL)"]
+    B -->|SQL async| C["Backend FastAPI<br/>catalogue + aperçus"]
+    C -->|HTTP JSON| D["Frontend Streamlit<br/>pages + composants Plotly"]
+    C --> E["Fichiers sources<br/>téléchargés à la demande"]
+    D --> F["Navigateur"]
 ```
+
+L'ingestion (`app.ingest`) est la **seule** étape qui interroge data.gouv.fr pour
+les métadonnées. Le backend lit ensuite la base locale ; il ne télécharge des
+fichiers que lorsqu'un utilisateur demande un aperçu, un profil ou une carte.
 
 ```
 .
@@ -64,6 +110,9 @@ flowchart LR
 │   ├── app/
 │   │   ├── main.py              # application FastAPI, CORS, erreurs, health
 │   │   ├── config.py            # réglages (préfixe DFE_)
+│   │   ├── database.py          # moteur async SQLAlchemy + init SQLite
+│   │   ├── models.py            # tables : organisations, datasets, ressources…
+│   │   ├── ingest.py            # CLI d'ingestion data.gouv.fr -> base locale
 │   │   ├── schemas.py           # modèles Pydantic exposés
 │   │   ├── api/
 │   │   │   ├── deps.py
@@ -73,9 +122,10 @@ flowchart LR
 │   │   │       ├── organizations.py # /api/organizations/*
 │   │   │       └── overview.py      # /api/stats/overview
 │   │   └── services/
-│   │       ├── datagouv.py      # client API, normalisation, facettes
+│   │       ├── catalog.py       # requêtes SQL du catalogue local
+│   │       ├── datagouv.py      # client API utilisé par l'ingestion
 │   │       ├── tabular.py       # lecture fichiers, aperçu, profil, GeoJSON
-│   │       └── cache.py         # cache TTL mémoire ou Redis
+│   │       └── cache.py         # cache TTL en mémoire (pas de Redis)
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── .env.example
@@ -110,6 +160,28 @@ flowchart LR
 └── README.md
 ```
 
+### Base de données
+
+L'ingestion crée les tables suivantes :
+
+| Table | Contenu |
+|---|---|
+| `organizations` | producteurs, logo, badges, compteurs, description |
+| `datasets` | métadonnées, texte de recherche normalisé, licence, métriques, période et zone |
+| `resources` | fichiers d'un jeu de données (URL, format, taille, URL Parquet) |
+| `dataset_formats` | formats normalisés + famille (`tabular`, `geographical`, `document`…) |
+| `dataset_tags` | thématiques indexées pour les filtres |
+| `site_stats` | compteurs globaux (réutilisations, services) |
+| `ingestion_runs` | journal des ingestions (statut, durée, volumes, erreur) |
+
+L'ingestion est un **remplacement complet** : elle vide les tables du catalogue
+puis insère l'instantané dans une seule transaction. Si le réseau ou l'API échoue
+en cours de route, la transaction est annulée et l'ancien catalogue reste lisible.
+Le journal `ingestion_runs` conserve la trace de la tentative.
+
+Le fichier `datafrance.db` est ignoré par Git : chaque environnement crée le sien
+avec la commande d'ingestion.
+
 ---
 
 ## 🚀 Démarrage rapide (Windows / PowerShell)
@@ -124,6 +196,21 @@ py -3.11 -m venv .venv
 # 2. Dépendances
 pip install -r backend\requirements.txt -r frontend\requirements.txt
 ```
+
+### Ingestion initiale (obligatoire une fois)
+
+```powershell
+cd backend
+python -m app.ingest              # catalogue complet (~75 000 datasets)
+# ou un échantillon rapide pour tester :
+python -m app.ingest --limit 2000
+```
+
+La base est créée dans `backend/datafrance.db` par défaut (`DFE_DATABASE_URL`).
+L'ingestion remplace entièrement le catalogue précédent dans une transaction :
+en cas d'échec, l'ancien contenu reste intact. Comptez environ 10 minutes pour le
+catalogue complet selon la connexion ; la commande affiche sa progression page
+par page. Un `--limit 2000` suffit pour développer et tester l'interface.
 
 ### Terminal 1 — backend FastAPI
 
@@ -162,7 +249,9 @@ python scripts\smoke_test.py
 ```
 
 Le script vérifie la santé du service, les statistiques, la recherche, le détail
-d'un jeu de données, l'aperçu, le profil et les organisations.
+d'un jeu de données, l'aperçu, le profil et les organisations. Si le catalogue
+est vide, lancez d'abord l'ingestion : l'API renvoie alors un message explicite
+(HTTP 503) au lieu de résultats vides.
 
 ---
 
@@ -170,9 +259,9 @@ d'un jeu de données, l'aperçu, le profil et les organisations.
 
 | Méthode | Route | Description |
 |---|---|---|
-| `GET` | `/api/health` | état du service (`?deep=true` pour tester data.gouv.fr) |
+| `GET` | `/api/health` | état du service, taille du catalogue et dernière ingestion |
 | `GET` | `/api/stats/overview` | totaux, facettes, derniers jeux de données |
-| `GET` | `/api/search/datasets` | recherche (`q`, `page`, `page_size`, `sort`, filtres) |
+| `GET` | `/api/search/datasets` | recherche locale (`q`, `page`, `page_size`, `sort`, filtres) |
 | `GET` | `/api/search/organizations` | recherche d'organisations |
 | `GET` | `/api/datasets/{id}` | fiche complète + ressources |
 | `GET` | `/api/datasets/{id}/preview` | aperçu d'une ressource (`resource_id`, `limit`) |
@@ -180,12 +269,15 @@ d'un jeu de données, l'aperçu, le profil et les organisations.
 | `GET` | `/api/datasets/{id}/geo` | FeatureCollection GeoJSON allégée pour la carte (`resource_id`, `limit`) |
 | `GET` | `/api/organizations/{id}` | fiche organisation + derniers datasets |
 
+`page_size` est plafonné à **100** par requête. Le total et le nombre de pages
+sont calculés sur la base locale, sans plafond artificiel.
+
 Exemples :
 
 ```bash
 curl "http://127.0.0.1:8000/api/search/datasets?q=transport&page_size=5"
-curl "http://127.0.0.1:8000/api/datasets/6aec4a5e2f9ad56a51d37e7c/resources"  # via /api/datasets/{id}
-curl "http://127.0.0.1:8000/api/datasets/6aec4a5e2f9ad56a51d37e7c/preview?limit=20"
+curl "http://127.0.0.1:8000/api/datasets/<id>"                 # fiche + ressources
+curl "http://127.0.0.1:8000/api/datasets/<id>/preview?limit=20"  # aperçu tabulaire
 ```
 
 ---
@@ -196,9 +288,11 @@ Copiez `backend/.env.example` vers `backend/.env` et ajustez si besoin.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `DFE_DATAGOUV_API_BASE` | `https://www.data.gouv.fr/api` | base de l'API amont |
-| `DFE_CACHE_TTL` | `300` | durée du cache (secondes) |
-| `DFE_REDIS_URL` | *(vide)* | cache Redis partagé, ex. `redis://127.0.0.1:6379/0` |
+| `DFE_DATABASE_URL` | `sqlite+aiosqlite:///./datafrance.db` | base locale ; PostgreSQL possible via `postgresql+asyncpg://…` (installer `asyncpg`) |
+| `DFE_DATAGOUV_API_BASE` | `https://www.data.gouv.fr/api` | API amont, **utilisée uniquement par l'ingestion** |
+| `DFE_HTTP_TIMEOUT` | `20` | timeout HTTP de l'ingestion et des téléchargements |
+| `DFE_CACHE_TTL` | `300` | durée du cache TTL en mémoire (secondes) |
+| `DFE_CACHE_MAXSIZE` | `512` | nombre maximal d'entrées du cache mémoire |
 | `DFE_MAX_DOWNLOAD_MB` | `25` | taille max d'un fichier téléchargé |
 | `DFE_MAX_PARQUET_DOWNLOAD_MB` | `60` | taille max d'un Parquet |
 | `DFE_MAX_GEOJSON_DOWNLOAD_MB` | `100` | taille max d'un GeoJSON |
@@ -208,17 +302,17 @@ Copiez `backend/.env.example` vers `backend/.env` et ajustez si besoin.
 
 ---
 
-## 🐳 Déploiement Docker (avec Redis)
+## 🐳 Déploiement Docker (sans Redis)
 
-Le fichier `docker-compose.yml` lance trois services : **Redis**, le **backend**
-FastAPI et le **frontend** Streamlit.
+Le fichier `docker-compose.yml` lance deux services : le **backend** FastAPI et le
+**frontend** Streamlit. La base SQLite vit dans un volume persistant.
 
 ```powershell
 # Construire et démarrer
-docker compose up --build
-
-# En arrière-plan
 docker compose up --build -d
+
+# Première ingestion (obligatoire) :
+docker compose run --rm backend python -m app.ingest
 
 # Arrêter
 docker compose down
@@ -226,8 +320,10 @@ docker compose down
 
 - Interface : <http://localhost:8501>
 - API : <http://localhost:8000/docs>
-- Le backend utilise automatiquement `DFE_REDIS_URL=redis://redis:6379/0`.
-- Sans Redis, le backend retombe sur son cache mémoire (aucune configuration requise).
+- Base : volume `datafrance-data`, fichier `/data/datafrance.db`.
+- Aucun service Redis ; le cache reste en mémoire dans le processus backend.
+- Pour rafraîchir le catalogue, relancer la commande `docker compose run --rm
+  backend python -m app.ingest`.
 
 ---
 
@@ -282,10 +378,16 @@ Les composants vivent dans `frontend/components/` et réutilisent les classes CS
 - Fichiers limités à **25 Mo** (60 Mo pour les Parquet, **100 Mo pour les GeoJSON**)
   et **20 000 lignes** pour le profil. Les gros fichiers texte (CSV/JSON) sont lus
   partiellement ; un GeoJSON est toujours téléchargé en entier pour rester valide.
-- Recherche plafonnée à **10 000 résultats** par l'API v2 de data.gouv.fr.
+- Le catalogue est un **instantané** : les nouveaux jeux de données n'apparaissent
+  qu'après une nouvelle ingestion. Le champ `last_ingestion` de `/api/health`
+  indique la date du dernier chargement réussi.
 - Formats supportés : CSV/TSV, JSON/GeoJSON/NDJSON, Excel, Parquet. Pas encore de ZIP, XML complexe ou SQL.
-- Cache **en mémoire par défaut** ; Redis est optionnel (perte du cache au redémarrage
-  sans Redis).
+- Cache **en mémoire uniquement** : il est perdu au redémarrage, et il n'est pas
+  partagé entre plusieurs workers (choix assumé pour cette version).
+- Les aperçus, profils et cartes téléchargent encore le fichier source à la
+  demande : seule la couche catalogue est entièrement locale.
+- Le type de producteur est déduit par une heuristique à partir des métadonnées
+  (nom, badges, sigle) ; ce n'est pas une donnée officielle.
 - Cartes GeoJSON limitées aux **800 premières géométries** (paramètre `limit` de l'API).
 - Graphiques automatiques simples ; les filtres locaux portent sur les lignes
   chargées dans le navigateur, pas sur le fichier complet.
@@ -299,7 +401,9 @@ Les composants vivent dans `frontend/components/` et réutilisent les classes CS
 - Export PDF natif et génération d'un rapport de comparaison.
 - Reverse proxy TLS (Caddy / Nginx) et monitoring.
 - Jointures entre deux jeux de données sur une clé commune.
-- Cache des DataFrames dans Redis (nécessite une sérialisation dédiée).
+- Recherche plein texte SQLite FTS5 pour remplacer les `LIKE` sur `search_text`.
+- Réintroduire Redis uniquement si le passage à plusieurs workers ou un besoin de
+  cache partagé le justifie, avec des mesures avant/après.
 
 ---
 

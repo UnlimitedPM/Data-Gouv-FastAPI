@@ -1,24 +1,17 @@
 name: datafrance-explorer
 
 services:
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis-data:/data
-    restart: unless-stopped
-
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      DFE_REDIS_URL: redis://redis:6379/0
+      DFE_DATABASE_URL: sqlite+aiosqlite:////data/datafrance.db
       DFE_CORS_ORIGINS: "*"
+    volumes:
+      - datafrance-data:/data
     ports:
       - "8000:8000"
-    depends_on:
-      - redis
     restart: unless-stopped
 
   frontend:
@@ -34,4 +27,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  redis-data:
+  datafrance-data:

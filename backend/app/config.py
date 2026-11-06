@@ -11,23 +11,26 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="DFE_", extra="ignore")
 
     app_name: str = "DataFrance Explorer API"
-    app_version: str = "0.1.0"
+    app_version: str = "0.2.0"
     app_description: str = (
-        "API de lecture et de visualisation des jeux de donnees publics "
-        "publies sur data.gouv.fr."
+        "API de lecture et de visualisation d'un catalogue data.gouv.fr "
+        "replique en base de donnees locale."
     )
 
-    # data.gouv.fr
+    # Base de donnees locale (SQLite par defaut, PostgreSQL possible)
+    database_url: str = "sqlite+aiosqlite:///./datafrance.db"
+
+    # data.gouv.fr (utilise uniquement par l'ingestion)
+
     datagouv_api_base: str = "https://www.data.gouv.fr/api"
     http_timeout: float = 20.0
     http_user_agent: str = (
-        "DataFranceExplorer/0.1 (+https://github.com/; contact: local dev)"
+        "DataFranceExplorer/0.2 (+https://github.com/UnlimitedPM/Data-Gouv-FastAPI)"
     )
 
-    # Cache memoire / Redis (laisser vide pour un cache 100 % memoire)
+    # Cache TTL en memoire du processus (pas de Redis dans cette version)
     cache_ttl: int = 300
     cache_maxsize: int = 512
-    redis_url: str | None = None
 
     # Previsualisation de fichiers
     max_download_mb: float = 25.0

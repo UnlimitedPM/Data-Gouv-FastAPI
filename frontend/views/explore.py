@@ -114,17 +114,11 @@ def render() -> None:
     total = int(result.get("total") or 0)
     pages = int(result.get("pages") or 1)
     datasets = result.get("data") or []
-    total_label = human_number(total) + ("+" if result.get("total_capped") else "")
 
     st.markdown(
-        f"**{total_label}** jeux de données trouvés · "
+        f"**{human_number(total)}** jeux de données trouvés · "
         f"page **{result.get('page', page)}** sur **{human_number(pages)}**"
     )
-    if result.get("total_capped"):
-        st.caption(
-            "Le filtrage par famille de formats ou type de producteur utilise l'API v2, "
-            "qui plafonne l'affichage à 10 000 résultats."
-        )
 
     if not datasets:
         empty_state("Aucun jeu de données ne correspond à ces critères. Essayez d'élargir la recherche.")

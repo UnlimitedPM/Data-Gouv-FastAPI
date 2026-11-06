@@ -21,4 +21,6 @@ if (-not (Test-Path (Join-Path $root "backend\.env"))) {
     Write-Host "Fichier backend/.env cree a partir de .env.example." -ForegroundColor Green
 }
 
-Write-Host "Termine. Lancez scripts\run_backend.ps1 puis scripts\run_frontend.ps1." -ForegroundColor Green
+Write-Host "Termine." -ForegroundColor Green
+Write-Host "Etape suivante (une fois) : cd backend; python -m app.ingest" -ForegroundColor Yellow
+Write-Host "Puis lancez scripts\run_backend.ps1 et scripts\run_frontend.ps1." -ForegroundColor Green

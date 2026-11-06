@@ -20,8 +20,17 @@ def get(path: str, **params: object) -> dict:
 
 
 def main() -> int:
-    health = get("/api/health", deep="true")
-    print(f"[ok] health       {health.get('status')} ({health.get('upstream_latency_ms')} ms)")
+    health = get("/api/health")
+    last_run = health.get("last_ingestion") or {}
+    print(
+        f"[ok] health       {health.get('status')} — "
+        f"{health.get('datasets', 0)} datasets, "
+        f"{health.get('organizations', 0)} organisations, "
+        f"derniere ingestion : {last_run.get('finished_at') or 'inconnue'}"
+    )
+    if health.get("catalog_empty"):
+        print("[!!] catalogue vide : lancez `python -m app.ingest` dans backend/")
+        return 1
 
     stats = get("/api/stats/overview")
     totals = stats["totals"]

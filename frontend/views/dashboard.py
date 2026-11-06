@@ -29,12 +29,12 @@ def _section(title: str, hint: str = "") -> None:
 def render() -> None:
     st.markdown("## Tableau de bord")
     st.caption(
-        "Vue d'ensemble en temps réel des données publiées sur data.gouv.fr "
-        "(chiffres issus de l'API officielle, mis en cache quelques minutes)."
+        "Vue d'ensemble du catalogue data.gouv.fr ingéré localement "
+        "(instantané en base : relancez l'ingestion pour actualiser)."
     )
 
     try:
-        with st.spinner("Interrogation de data.gouv.fr…"):
+        with st.spinner("Lecture du catalogue local…"):
             overview = api.get_overview()
     except api.ApiError as exc:
         st.error(str(exc))

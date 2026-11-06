@@ -7,15 +7,20 @@ import streamlit as st
 
 def render() -> None:
     st.markdown("## À propos de DataFrance Explorer")
-    st.caption("Prototype open source construit sur l'API publique de data.gouv.fr.")
+    st.caption(
+        "Explorateur open source d'un instantané du catalogue data.gouv.fr, "
+        "servi par une base locale."
+    )
 
     st.markdown(
         """
         ### Le projet
 
-        **DataFrance Explorer** est un premier jet d'explorateur de données publiques
-        françaises. Il interroge l'API officielle [data.gouv.fr](https://www.data.gouv.fr)
-        et propose :
+        **DataFrance Explorer** est un explorateur de données publiques françaises.
+        Une ingestion hors ligne récupère le catalogue de
+        [data.gouv.fr](https://www.data.gouv.fr) et le stocke dans une base locale ;
+        l'API FastAPI lit ensuite cette base sans dépendre du réseau. Le projet
+        propose :
 
         - un **tableau de bord** avec les volumes et répartitions globales ;
         - une **recherche en direct** (résultats pendant la frappe) par mot-clé,
@@ -37,26 +42,36 @@ def render() -> None:
         ### Architecture
 
         ```
-        data.gouv.fr (API v2)
-                 │
+        data.gouv.fr (API v1 + v2)
+                 │  ingestion hors ligne
                  ▼
-        ┌─────────────────────────┐      HTTP/JSON      ┌──────────────────────┐
-        │  Backend FastAPI        │ ◄─────────────────► │  Frontend Streamlit  │
-        │  · proxy + cache TTL    │                     │  · header / footer   │
-        │  · normalisation        │                     │  · pages & composants│
-        │  · pandas (aperçu/profil)│                     │  · Plotly            │
-        └─────────────────────────┘                     └──────────────────────┘
+        ┌─────────────────────────┐      SQL async       ┌──────────────────────┐
+        │  Base locale SQLite     │ ◄──────────────────► │  Backend FastAPI     │
+        │  · organisations        │                      │  · catalogue         │
+        │  · datasets/ressources  │                      │  · aperçus pandas    │
+        │  · formats/tags         │                      │  · cache TTL mémoire │
+        └─────────────────────────┘                      └──────────┬───────────┘
+                                                                    │ HTTP/JSON
+                                                                    ▼
+                                                         ┌──────────────────────┐
+                                                         │  Frontend Streamlit  │
+                                                         │  · header / footer   │
+                                                         │  · pages & composants│
+                                                         │  · Plotly            │
+                                                         └──────────────────────┘
         ```
 
-        Le backend télécharge et lit les fichiers côté serveur : le navigateur ne
-        reçoit que les lignes nécessaires à l'affichage. Les fichiers Parquet
-        pré-calculés par data.gouv.fr sont utilisés en priorité lorsqu'ils existent.
+        Seule l'ingestion interroge data.gouv.fr pour les métadonnées. Le backend
+        télécharge encore les fichiers sources à la demande pour les aperçus, profils
+        et cartes : le navigateur ne reçoit que les lignes nécessaires à l'affichage.
+        Les fichiers Parquet pré-calculés par data.gouv.fr sont utilisés en priorité
+        lorsqu'ils existent.
 
         ### Endpoints principaux
 
         | Méthode | Route | Description |
         |---|---|---|
-        | `GET` | `/api/health` | état du service |
+        | `GET` | `/api/health` | état du service et dernière ingestion |
         | `GET` | `/api/stats/overview` | chiffres clés + facettes |
         | `GET` | `/api/search/datasets` | recherche de jeux de données |
         | `GET` | `/api/search/organizations` | recherche d'organisations |
@@ -80,11 +95,16 @@ def render() -> None:
 
         ### Limites de cette première version
 
+        - Le catalogue est un **instantané** : il faut relancer
+          `python -m app.ingest` pour voir les nouveaux jeux de données. La date de
+          la dernière ingestion est exposée par `/api/health`.
         - L'aperçu et le profil sont limités en taille (25 Mo par fichier par défaut,
           20 000 lignes analysées) pour protéger le serveur.
         - Les fichiers très volumineux ou exotiques (XML complexes, archives ZIP)
           ne sont pas encore pris en charge.
-        - Le cache est en mémoire : il est perdu au redémarrage du backend.
+        - Le cache est **en mémoire uniquement** : il est perdu au redémarrage et
+          n'est pas partagé entre plusieurs workers. Redis n'est pas utilisé dans
+          cette version.
         - Les charts sont générés automatiquement à partir des types détectés :
           ils restent volontairement simples.
         - Les filtres locaux et la carte portent sur les lignes chargées dans
@@ -93,7 +113,8 @@ def render() -> None:
           `lon`, `lng`, `longitude`) ou une ressource GeoJSON ; un exemple est
           proposé dans l'onglet Carte.
         - Les cartes GeoJSON sont limitées aux 800 premières géométries.
-        - Le cache est en mémoire par défaut ; Redis est optionnel (Docker Compose).
+        - Le type de producteur est déduit par heuristique, pas par une source
+          officielle.
 
         ### Pistes pour la suite
 

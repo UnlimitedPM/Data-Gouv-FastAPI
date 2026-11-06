@@ -62,9 +62,12 @@ with st.sidebar:
     status = api.health()
     render_sidebar_status(
         ok=status.get("status") == "ok",
-        detail=str(status.get("detail", "")),
+        detail=str(status.get("database_error") or status.get("detail", "")),
+        catalog_empty=bool(status.get("catalog_empty")),
     )
     st.caption(f"Backend : {api.API_URL}")
+    if status.get("catalog_empty"):
+        st.caption("Base vide : lancez `python -m app.ingest` dans backend/.")
 
     if st.button("Rafraîchir les données", width="stretch"):
         st.cache_data.clear()

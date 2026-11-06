@@ -91,6 +91,7 @@ header[data-testid="stHeader"] { background: transparent; }
   box-shadow: 0 0 0 3px rgba(39, 166, 88, 0.25);
 }
 .dfe-dot--down { background: #e1000f; box-shadow: 0 0 0 3px rgba(225, 0, 15, 0.25); }
+.dfe-dot--warn { background: #f0a500; box-shadow: 0 0 0 3px rgba(240, 165, 0, 0.25); }
 
 /* ----------------------------------------------------------------- header */
 .dfe-header {
