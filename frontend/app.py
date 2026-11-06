@@ -69,6 +69,16 @@ with st.sidebar:
     if status.get("catalog_empty"):
         st.caption("Base vide : lancez `python -m app.ingest` dans backend/.")
 
+    # Documentation Swagger generee automatiquement par FastAPI (aucune page a
+    # maintenir cote frontend).
+    st.link_button(
+        "Documentation de l'API",
+        api.docs_url(),
+        icon=":material/menu_book:",
+        width="stretch",
+        help="Interface Swagger generee par FastAPI (/docs) — endpoints et essais en direct.",
+    )
+
     if st.button("Rafraîchir les données", width="stretch"):
         st.cache_data.clear()
         st.rerun()

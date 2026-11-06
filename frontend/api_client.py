@@ -9,7 +9,16 @@ import requests
 import streamlit as st
 
 API_URL = os.getenv("API_URL", "http://127.0.0.1:8000").rstrip("/")
+# URL de l'API telle que vue par le navigateur du visiteur. Vide par defaut :
+# le lien vers la documentation est alors relatif (/docs), ce qui fonctionne
+# quand le site et l'API sont servis sur le meme domaine par un reverse proxy.
+PUBLIC_API_URL = os.getenv("PUBLIC_API_URL", "").rstrip("/")
 TIMEOUT = float(os.getenv("API_TIMEOUT", "90"))
+
+
+def docs_url() -> str:
+    """Lien vers la documentation interactive generee par FastAPI (Swagger UI)."""
+    return f"{PUBLIC_API_URL}/docs" if PUBLIC_API_URL else "/docs"
 
 
 class ApiError(RuntimeError):
