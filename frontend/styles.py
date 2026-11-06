@@ -52,6 +52,18 @@ header[data-testid="stHeader"] { background: transparent; }
 [data-testid="stSidebar"] .stRadio > div[role="radiogroup"] label:hover {
   background: rgba(255, 255, 255, 0.16);
 }
+/* Lien « Documentation de l'API » (st.link_button) : Streamlit lui donne un fond
+   blanc, alors que le thème force un texte clair dans la sidebar -> texte
+   invisible. On reprend le fond translucide des entrées de navigation. */
+[data-testid="stSidebar"] a[data-testid^="stBaseLinkButton"] {
+  background: rgba(255, 255, 255, 0.16) !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  border-radius: 10px;
+}
+[data-testid="stSidebar"] a[data-testid^="stBaseLinkButton"]:hover {
+  background: rgba(255, 255, 255, 0.28) !important;
+  border-color: #ffffff !important;
+}
 [data-testid="stSidebar"] hr {
   border-color: rgba(255, 255, 255, 0.18);
 }
