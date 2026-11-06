@@ -17,3 +17,10 @@ frontend/.streamlit/secrets.toml
 *.csv
 *.xlsx
 *.zip
+
+# Base de donnees locale generee par l'ingestion (jamais dans l'image)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3

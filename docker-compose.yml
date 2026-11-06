@@ -1,3 +1,14 @@
+# DataFrance Explorer — backend FastAPI (8000) + frontend Streamlit (8501).
+# Le catalogue data.gouv.fr est ingéré dans une base SQLite persistée par le
+# volume `datafrance-data`.
+#
+# Déploiement derrière un reverse proxy (Traefik) : aucun port n'est publié sur
+# l'hôte, les deux conteneurs rejoignent un réseau Docker externe. Le routage
+# (nom de domaine -> service) se déclare côté reverse proxy, jamais ici.
+#
+# Ingestion initiale (une seule fois, ~10 min) :
+#   docker compose run --rm backend python -m app.ingest
+
 name: datafrance-explorer
 
 services:
@@ -5,26 +16,81 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    container_name: datafrance-backend
     environment:
       DFE_DATABASE_URL: sqlite+aiosqlite:////data/datafrance.db
       DFE_CORS_ORIGINS: "*"
+      TZ: Europe/Paris
     volumes:
       - datafrance-data:/data
-    ports:
-      - "8000:8000"
+    networks:
+      - internal
+      - reverse-proxy
+    expose:
+      - "8000"
+    labels:
+      # Image construite localement (pas de registre) : WUD n'a rien à suivre.
+      - "wud.watch=false"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    container_name: datafrance-frontend
     environment:
-      API_URL: http://backend:8000
-    ports:
-      - "8501:8501"
+      API_URL: http://datafrance-backend:8000
+      TZ: Europe/Paris
+    # Derrière le reverse proxy, l'origine vue par le navigateur est le domaine
+    # public : les contrôles CORS/XSRF de Streamlit bloqueraient les appels.
+    command:
+      - streamlit
+      - run
+      - app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --server.enableCORS=false
+      - --server.enableXsrfProtection=false
+      - --browser.gatherUsageStats=false
+    networks:
+      - internal
+      - reverse-proxy
+    expose:
+      - "8501"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    labels:
+      - "wud.watch=false"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Streamlit n'écrit rien sur disque : racine en lecture seule, /tmp en RAM.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
 volumes:
   datafrance-data:
+
+networks:
+  internal:
+  reverse-proxy:
+    external: true

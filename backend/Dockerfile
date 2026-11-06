@@ -11,6 +11,14 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY backend/app ./app
 
+# Execution non-root. /data est cree et appartient a `app` : un volume nomme
+# Docker herite des droits du repertoire de l'image lors de sa creation.
+RUN useradd --create-home --uid 1000 app \
+    && mkdir -p /data \
+    && chown -R app:app /data
+
+USER app
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

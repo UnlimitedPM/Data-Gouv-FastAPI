@@ -98,7 +98,10 @@ async def health(deep: bool = False) -> dict[str, Any]:
         "status": "ok",
         "version": settings.app_version,
         "mode": "catalogue local",
-        "database": settings.database_url,
+        # Seul le dialecte est expose : la chaine complete contiendrait les
+        # identifiants de la base si on passait a PostgreSQL. Cet endpoint est
+        # public.
+        "database": settings.database_url.split("://", 1)[0],
     }
     started = time.perf_counter()
     try:

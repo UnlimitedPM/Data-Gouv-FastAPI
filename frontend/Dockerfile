@@ -11,6 +11,11 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY frontend/ ./
 
+# Execution non-root (aucune ecriture disque necessaire cote Streamlit).
+RUN useradd --create-home --uid 1000 app
+
+USER app
+
 EXPOSE 8501
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

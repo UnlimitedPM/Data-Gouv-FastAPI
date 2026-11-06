@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
+import ipaddress
 import json
 import math
 import re
+import socket
 from datetime import date, datetime
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 import numpy as np
@@ -57,6 +61,57 @@ class TabularError(RuntimeError):
 # --------------------------------------------------------------------------- #
 # Telechargement
 # --------------------------------------------------------------------------- #
+_MAX_REDIRECTS = 5
+
+
+def _is_blocked_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Vrai si l'adresse n'est pas routable sur Internet (interne, boucle locale...)."""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return not ip.is_global
+
+
+async def _assert_public_url(url: str) -> None:
+    """Refuse les URLs non http(s) et les hotes qui pointent vers le reseau interne.
+
+    Les URLs de ressources proviennent du catalogue data.gouv.fr, ou n'importe
+    qui peut publier un jeu de donnees : sans ce filtre, un dataset pointant
+    vers `http://192.168.x.x/` ou `http://169.254.169.254/` transformerait
+    l'apercu en SSRF (le serveur irait chercher la ressource a la place du
+    client, et en renverrait le contenu).
+    """
+    parts = urlsplit(url)
+    if parts.scheme not in {"http", "https"}:
+        raise TabularError(
+            f"URL de ressource refusee (schema non supporte : {parts.scheme or 'absent'})."
+        )
+    host = parts.hostname
+    if not host:
+        raise TabularError("URL de ressource invalide (hote manquant).")
+
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    try:
+        infos = await asyncio.to_thread(
+            socket.getaddrinfo, host, port, type=socket.SOCK_STREAM
+        )
+    except socket.gaierror as exc:
+        raise TabularError(f"Hote introuvable pour cette ressource : {host}") from exc
+
+    for info in infos:
+        address = info[4][0]
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:  # adresse non parsee : on refuse par prudence
+            raise TabularError(
+                f"URL de ressource refusee (adresse illisible : {address})."
+            ) from None
+        if _is_blocked_address(ip):
+            raise TabularError(
+                "URL de ressource refusee : elle pointe vers une adresse "
+                f"interne ({host} -> {address})."
+            )
+
+
 async def _download(
     http: httpx.AsyncClient,
     url: str,
@@ -64,23 +119,40 @@ async def _download(
     *,
     allow_truncate: bool = False,
 ) -> tuple[bytes, bool]:
-    """Telecharge une ressource, avec troncature optionnelle des gros fichiers texte."""
-    try:
-        async with http.stream("GET", url) as response:
-            response.raise_for_status()
-            buffer = bytearray()
-            async for chunk in response.aiter_bytes(65536):
-                buffer.extend(chunk)
-                if len(buffer) > max_bytes:
-                    if allow_truncate:
-                        return bytes(buffer[:max_bytes]), True
-                    raise TabularError(
-                        "Fichier trop volumineux pour l'apercu "
-                        f"(limite {max_bytes // 1_000_000} Mo)."
-                    )
-            return bytes(buffer), False
-    except httpx.HTTPError as exc:
-        raise TabularError(f"Telechargement du fichier impossible : {exc}") from exc
+    """Telecharge une ressource, avec troncature optionnelle des gros fichiers texte.
+
+    Les redirections sont suivies a la main : chaque saut est revalide par
+    `_assert_public_url`, sinon un serveur distant pourrait rediriger vers le
+    reseau interne (le client partage a `follow_redirects=True`).
+    """
+    current = url
+    for _hop in range(_MAX_REDIRECTS + 1):
+        await _assert_public_url(current)
+        try:
+            async with http.stream("GET", current, follow_redirects=False) as response:
+                if response.is_redirect:
+                    location = response.headers.get("location")
+                    if not location:
+                        raise TabularError("Redirection sans destination.")
+                    current = urljoin(current, location)
+                    continue
+
+                response.raise_for_status()
+                buffer = bytearray()
+                async for chunk in response.aiter_bytes(65536):
+                    buffer.extend(chunk)
+                    if len(buffer) > max_bytes:
+                        if allow_truncate:
+                            return bytes(buffer[:max_bytes]), True
+                        raise TabularError(
+                            "Fichier trop volumineux pour l'apercu "
+                            f"(limite {max_bytes // 1_000_000} Mo)."
+                        )
+                return bytes(buffer), False
+        except httpx.HTTPError as exc:
+            raise TabularError(f"Telechargement du fichier impossible : {exc}") from exc
+
+    raise TabularError("Trop de redirections pour cette ressource.")
 
 
 # --------------------------------------------------------------------------- #
